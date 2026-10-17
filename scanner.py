@@ -62,19 +62,24 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 def fetch_klines(symbol, interval, limit=200):
-    r = requests.get(BINANCE_BASE,
-                     params={"symbol": symbol, "interval": interval, "limit": limit},
-                     timeout=15)
-    r.raise_for_status()
-    data = r.json()
-    df = pd.DataFrame(data, columns=[
-        "open_time","open","high","low","close","volume",
-        "close_time","qav","trades","tbbav","tbqav","ignore"])
-    df["close"] = df["close"].astype(float)
-    # 🔴 اصلاح مهم: حذف آخرین کندل (کندل در حال تشکیل) برای جلوگیری از سیگنال کاذب
-    if len(df) > 1:
-        df = df.iloc[:-1] 
-    return df
+    try:
+        r = requests.get(BINANCE_BASE,
+                         params={"symbol": symbol, "interval": interval, "limit": limit},
+                         timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        df = pd.DataFrame(data, columns=[
+            "open_time","open","high","low","close","volume",
+            "close_time","qav","trades","tbbav","tbqav","ignore"])
+        df["close"] = df["close"].astype(float)
+        
+        # 🔴 حذف آخرین کندل (کندل در حال تشکیل) برای جلوگیری از سیگنال کاذب
+        if len(df) > 1:
+            df = df.iloc[:-1] 
+        return df
+    except Exception as e:
+        print(f"Error fetching {symbol} {interval}: {e}")
+        return None
 
 def linreg(series, length, offset=0):
     s = series.shift(offset)
@@ -108,15 +113,22 @@ def scan_zlsma():
     for sym in ZLSMA_SYMBOLS:
         row = {"Symbol": sym}
         for tf_name, tf in ZLSMA_TF.items():
-            try:
-                limit = 200 if tf_name in ("3m","5m","15m") else 300
-                df = fetch_klines(sym, tf, limit=limit)
-                z  = zlsma(df["close"])
-                row[tf_name] = trend_of(z)
-            except Exception:
+            limit = 300 if tf_name == "4h" else 200
+            df = fetch_klines(sym, tf, limit=limit)
+            
+            if df is not None and len(df) >= ZLSMA_LEN:
+                z = zlsma(df["close"])
+                trend_result = trend_of(z)
+                row[tf_name] = trend_result
+                # پرینت برای دیباگ
+                print(f"{sym} | {tf} | {trend_result}")
+            else:
                 row[tf_name] = "ERR"
-            time.sleep(0.12)
+                print(f"{sym} | {tf} | ERR")
+                
+            time.sleep(0.1)
         rows.append(row)
+        
     df = pd.DataFrame(rows)
     df["Score"] = (df[tf_keys] == "UP").sum(axis=1)
     df = df.sort_values("Score", ascending=False).reset_index(drop=True)
@@ -250,13 +262,18 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df):
         msg += f"{'Symbol':<9} | {'3m':<2} | {'5m':<2} | {'15m':<3} | {'1h':<2} | {'4h':<2} | Score\n"
         msg += "-" * 45 + "\n"
         
+        def get_icon(val):
+            if val == "UP": return "🟢"
+            if val == "DOWN": return "🔴"
+            return "⚪" # برای ERR
+
         for _, r in zdf.iterrows():
             sym_short = r['Symbol'].replace("USDT", "")[:9]
-            t3 = "🟢" if r.get('3m') == "UP" else "🔴"
-            t5 = "🟢" if r.get('5m') == "UP" else "🔴"
-            t15 = "🟢" if r.get('15m') == "UP" else "🔴"
-            t1h = "🟢" if r.get('1h') == "UP" else "🔴"
-            t4h = "🟢" if r.get('4h') == "UP" else "🔴"
+            t3 = get_icon(r.get('3m'))
+            t5 = get_icon(r.get('5m'))
+            t15 = get_icon(r.get('15m'))
+            t1h = get_icon(r.get('1h'))
+            t4h = get_icon(r.get('4h'))
             score = int(r['Score'])
             msg += f"{sym_short:<9} | {t3}  | {t5}  | {t15}  | {t1h}  | {t4h}  | {score}/5\n"
             
