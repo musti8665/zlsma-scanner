@@ -1,5 +1,5 @@
 # ============================================================
-# Combined Scanner: ZLSMA (via CoinGecko) + ICT with Multi-TF USDT.D Check
+# Combined Scanner: ZLSMA + ICT (All via yfinance - Ultra Stable)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -13,13 +13,14 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
+# تبدیل نام ارزها به فرمت yfinance
 ZLSMA_SYMBOLS = [
-    "shiba-inu","people","zcash","arkham","myx","celestia",
-    "internet-computer","thorchain","dogs","bome","sei-network",
-    "notcoin","aptos","dogwifcoin","avalanche-2","worldcoin-wld",
-    "memecoin","pepe","arweave","cardano","near","optimism",
-    "sui","bonk","coinbase-wrapped-btc" # (نمونه ارزها)
+    "SHIB-USD","PEOPLE-USD","ZEC-USD","ARKM-USD","MYX-USD","TIA-USD",
+    "ICP-USD","RUNE-USD","DOGS-USD","BOME-USD","SEI-USD",
+    "NOT-USD","APT-USD","WIF-USD","AVAX-USD","WLD-USD","MEME-USD","PEPE-USD",
+    "AR-USD","ADA-USD","NEAR-USD","OP-USD","SUI-USD","BONK-USD","CKB-USD"
 ]
+
 ZLSMA_TF = {"3m":"3m", "5m":"5m", "15m":"15m", "1h":"1h", "4h":"4h"}
 ZLSMA_LEN = 32
 ZLSMA_OFF = 0
@@ -61,30 +62,21 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 # ==========================================
-# 🟢 دریافت دیتا از CoinGecko (جایگزین بایننس)
+# دریافت دیتا از yfinance (سریع و بدون بلاک)
 # ==========================================
-def fetch_coingecko_data(symbol, interval, limit=200):
+def yf_data(symbol, interval, days):
+    end = datetime.now(); start = end - timedelta(days=days)
     try:
-        # CoinGecko روزها را قبول می‌کند. 
-        days = "1" if interval in ["3m","5m","15m","1h"] else "7" if interval == "4h" else "30"
-        
-        url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart"
-        params = {"vs_currency": "usd", "days": days}
-        
-        r = requests.get(url, params=params, timeout=20)
-        r.raise_for_status()
-        data = r.json()["prices"]
-        
-        # فقط قیمت‌های بسته شدن
-        prices = [p[1] for p in data]
-        df = pd.DataFrame(prices, columns=["close"])
-        
-        # حذف کندل آخر (ناقص)
-        if len(df) > 1:
-            df = df.iloc[:-1]
-        return df
+        df = yf.download(symbol, start=start, end=end, interval=interval, progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        if df.empty or len(df) < 60: 
+            return None
+        df = df[["Open","High","Low","Close"]].dropna()
+        df.columns = ["open","high","low","close"]
+        # 🔴 حذف کندل آخر (ناقص)
+        return df.iloc[:-1] 
     except Exception as e:
-        print(f"CG Error for {symbol}: {e}")
         return None
 
 def linreg(series, length, offset=0):
@@ -117,18 +109,18 @@ def scan_zlsma():
     rows = []
     tf_keys = list(ZLSMA_TF.keys())
     for sym in ZLSMA_SYMBOLS:
-        row = {"Symbol": sym.upper()[:9]} # فقط برای نمایش
+        row = {"Symbol": sym.replace("-USD", "")[:9]}
         for tf_name, tf in ZLSMA_TF.items():
-            df = fetch_coingecko_data(sym, tf, limit=300)
+            # برای تایم فریم 4h به روزهای بیشتری نیاز داریم
+            days = 30 if tf == "4h" else 7
+            df = yf_data(sym, tf, days)
             
             if df is not None and len(df) >= ZLSMA_LEN:
                 z = zlsma(df["close"])
-                trend_result = trend_of(z)
-                row[tf_name] = trend_result
+                row[tf_name] = trend_of(z)
             else:
                 row[tf_name] = "ERR"
-                
-            time.sleep(1.5) # CoinGecko به تاخیر نیاز دارد تا بلاک نشود!
+            time.sleep(0.1)
         rows.append(row)
         
     df = pd.DataFrame(rows)
@@ -137,7 +129,7 @@ def scan_zlsma():
     return df
 
 # ==========================================
-# 🟡 بقیه کدها (ICT و دامیننس و پیام)
+# بقیه کدها (ICT و دامیننس)
 # ==========================================
 def get_usdt_dominance_trend():
     tfs = {"15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"}
@@ -165,19 +157,6 @@ def get_usdt_dominance_trend():
         for tf in tfs:
             results[tf] = {"trend": "❓", "bias": "neutral", "emoji": "❓"}
         return results, None
-
-def yf_data(symbol, interval, days=ICT_LOOKBACK_DAYS):
-    end = datetime.now(); start = end - timedelta(days=days)
-    try:
-        df = yf.download(symbol, start=start, end=end, interval=interval, progress=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        if df.empty or len(df) < 60: return None
-        df = df[["Open","High","Low","Close"]].dropna()
-        df.columns = ["open","high","low","close"]
-        return df
-    except:
-        return None
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -230,7 +209,8 @@ def scan_ict(usdt_tfs):
     for symbol in ICT_SYMBOLS:
         for tf in ICT_TF_LIST:
             try:
-                df = yf_data(symbol, interval=tf)
+                days = 30 if tf == "4h" else 7
+                df = yf_data(symbol, tf, days)
                 if df is None: continue
                 ph, pl = find_pivots(df)
                 signals = detect_sweeps(df, ph, pl)
@@ -303,7 +283,7 @@ def main():
 
     usdt_tfs, current_dom = get_usdt_dominance_trend()
 
-    print("=" * 70); print("ZLSMA Scanner (via CoinGecko)"); print("=" * 70)
+    print("=" * 70); print("ZLSMA Scanner (via yfinance)"); print("=" * 70)
     zdf = scan_zlsma()
     print(zdf.to_string(index=False))
 
