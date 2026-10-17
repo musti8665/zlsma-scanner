@@ -13,23 +13,26 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
-# تبدیل نام ارزها به فرمت yfinance
+# 🟢 ارزهای جدید به ZLSMA اضافه شدند
 ZLSMA_SYMBOLS = [
     "SHIB-USD","PEOPLE-USD","ZEC-USD","ARKM-USD","MYX-USD","TIA-USD",
     "ICP-USD","RUNE-USD","DOGS-USD","BOME-USD","SEI-USD",
     "NOT-USD","APT-USD","WIF-USD","AVAX-USD","WLD-USD","MEME-USD","PEPE-USD",
-    "AR-USD","ADA-USD","NEAR-USD","OP-USD","SUI-USD","BONK-USD","CKB-USD"
+    "AR-USD","ADA-USD","NEAR-USD","OP-USD","SUI-USD","BONK-USD","CKB-USD",
+    "HYPE32196-USD", "HBAR-USD", "ALGO-USD", "INJ-USD", "FET-USD", "UNI-USD", "ONDO-USD"
 ]
 
 ZLSMA_TF = {"3m":"3m", "5m":"5m", "15m":"15m", "1h":"1h", "4h":"4h"}
 ZLSMA_LEN = 32
 ZLSMA_OFF = 0
 
+# 🟢 ارزهای جدید به ICT اضافه شدند
 ICT_SYMBOLS = [
     "SHIB-USD","ICP-USD","SEI-USD","NOT-USD","WIF-USD","AVAX-USD",
     "WLD-USD","PEPE-USD","ADA-USD","NEAR-USD","OP-USD","BONK-USD",
     "SOL-USD","INJ-USD","FIL-USD","ARB-USD","GALA-USD","AAVE-USD",
     "STX-USD","THETA-USD","RUNE-USD","DOGE-USD","HBAR-USD",
+    "HYPE32196-USD", "ALGO-USD", "FET-USD", "UNI-USD", "ONDO-USD"
 ]
 ICT_TF_LIST = ["15m", "1h", "4h"] 
 ICT_LOOKBACK_DAYS = 30
@@ -71,6 +74,7 @@ def yf_data(symbol, interval, days):
             return None
         df = df[["Open","High","Low","Close"]].dropna()
         df.columns = ["open","high","low","close"]
+        # 🔴 حذف کندل آخر (ناقص)
         return df.iloc[:-1] 
     except Exception as e:
         return None
@@ -105,7 +109,7 @@ def scan_zlsma():
     rows = []
     tf_keys = list(ZLSMA_TF.keys())
     for sym in ZLSMA_SYMBOLS:
-        row = {"Symbol": sym.replace("-USD", "")[:9]}
+        row = {"Symbol": sym.replace("-USD", "").replace("32196", "")[:9]}
         for tf_name, tf in ZLSMA_TF.items():
             days = 30 if tf == "4h" else 7
             df = yf_data(sym, tf, days)
@@ -206,18 +210,22 @@ def scan_ict(usdt_tfs):
                 if df is None: continue
                 ph, pl = find_pivots(df)
                 signals = detect_sweeps(df, ph, pl)
-                clean = symbol.replace("-USD", "/USDT")
+                clean = symbol.replace("-USD", "/USDT").replace("32196", "")
                 for sig in signals:
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
+                    trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "❓"
+                    
                     if bias == "bullish":
                         rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
                     elif bias == "bearish":
                         rel = "موافق روند" if sig["type"]=="SHORT" else "خلاف روند"
                     else:
                         rel = "خنثی"
+                    
                     results.append({"Symbol": clean, "TF": tf, "Signal": sig["type"],
                                     "Score": sig["score"], "Stage": sig["stage"],
                                     "USDT.D Relation": rel,
+                                    "USDT.D Trend": trend_emoji,
                                     "Level": round(sig["level"], 8),
                                     "Price": round(sig["price"], 8)})
             except Exception as e:
@@ -260,8 +268,9 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df):
         msg += f"💧 <b>ICT Liquidity Sweep</b> ({len(ict_df)} سیگنال)\n\n"
         for _, r in ict_df.iterrows():
             emo = "🟢" if r["Signal"] == "LONG" else "🔴"
+            # 🟢 اضافه شدن دامیننس تتر به هر سیگنال ICT
             msg += (f"{emo} <code>{r['Symbol']}</code> | TF: {r['TF']} | {r['Signal']} "
-                    f"| ⭐{r['Score']} | مرحله: {r['Stage']} | {r['USDT.D Relation']}\n")
+                    f"| ⭐{r['Score']} | مرحله: {r['Stage']} | USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n")
         msg += "\n"
 
     if zdf.empty and ict_df.empty:
@@ -287,8 +296,7 @@ def main():
     new_ict = []
     now_ts = time.time()
     
-    # 🔴 تغییر مهم: زمان ضد اسپم از ۱ ساعت به ۳۰ دقیقه (نیم ساعت) تغییر کرد
-    HALF_HOUR = 30 * 60  # 30 دقیقه به ثانیه (1800 ثانیه)
+    HALF_HOUR = 30 * 60  # ضد اسپم ۳۰ دقیقه
 
     for _, r in ict_df.iterrows() if not ict_df.empty else []:
         sym = r['Symbol']
