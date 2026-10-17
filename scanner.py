@@ -1,5 +1,5 @@
 # ============================================================
-# Combined Scanner: ZLSMA (3m/5m/15m/1h/4h) + ICT Liquidity Sweep
+# Combined Scanner: ZLSMA + ICT Liquidity Sweep
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -13,12 +13,13 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
+# POPCATUSDT حذف شد
 ZLSMA_SYMBOLS = [
     "SHIBUSDT","PEOPLEUSDT","ZECUSDT","ARKMUSDT","MYXUSDT","TIAUSDT",
     "ICPUSDT","RUNEUSDT","DOGSUSDT","BOMEUSDT","SEIUSDT",
     "NOTUSDT","APTUSDT","WIFUSDT","AVAXUSDT","WLDUSDT","MEMEUSDT","PEPEUSDT",
     "ARUSDT","ADAUSDT","NEARUSDT","OPUSDT","SUIUSDT","BONKUSDT",
-    "CKBUSDT","POPCATUSDT",
+    "CKBUSDT"
 ]
 ZLSMA_TF = {"3m":"3m", "5m":"5m", "15m":"15m", "1h":"1h", "4h":"4h"}
 ZLSMA_LEN = 32
@@ -31,7 +32,8 @@ ICT_SYMBOLS = [
     "SOL-USD","INJ-USD","FIL-USD","ARB-USD","GALA-USD","AAVE-USD",
     "STX-USD","THETA-USD","RUNE-USD","DOGE-USD","HBAR-USD",
 ]
-ICT_TF = "15m"
+# اضافه شدن تایم فریم های 1h و 4h برای ICT
+ICT_TF_LIST = ["15m", "1h", "4h"] 
 ICT_LOOKBACK_DAYS = 7
 PIVOT_LENGTH = 10
 MAX_ACTIVE_LEVELS = 5
@@ -144,15 +146,18 @@ def get_usdt_dominance_trend():
         return {"dominance": None, "trend": "نامشخص", "emoji": "❓",
                 "bias": "neutral", "usdt_change": 0, "market_change": 0}
 
-def yf_data(symbol, interval=ICT_TF, days=ICT_LOOKBACK_DAYS):
+def yf_data(symbol, interval, days=ICT_LOOKBACK_DAYS):
     end = datetime.now(); start = end - timedelta(days=days)
-    df = yf.download(symbol, start=start, end=end, interval=interval, progress=False)
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    if df.empty or len(df) < 60: return None
-    df = df[["Open","High","Low","Close"]].dropna()
-    df.columns = ["open","high","low","close"]
-    return df
+    try:
+        df = yf.download(symbol, start=start, end=end, interval=interval, progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        if df.empty or len(df) < 60: return None
+        df = df[["Open","High","Low","Close"]].dropna()
+        df.columns = ["open","high","low","close"]
+        return df
+    except:
+        return None
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -179,9 +184,11 @@ def calculate_stage(df, level, signal_type):
     time_score = min(10, max(1, int(bars_since / 3)))
     final = int(round(move_score * 0.65 + time_score * 0.35))
     final = max(1, min(10, final))
-    if final <= 3:   return final, "ابتدای راه", "🟢"
-    elif final <= 6: return final, "وسط راه",   "🟡"
-    else:            return final, "آخر راه",    "🔴"
+    
+    # تبدیل کلمات به عدد 1، 2، 3
+    if final <= 3:   return final, "1", "🟢"  # ابتدای راه
+    elif final <= 6: return final, "2", "🟡"  # وسط راه
+    else:            return final, "3", "🔴"  # آخر راه
 
 def detect_sweeps(df, ph, pl):
     signals = []
@@ -204,31 +211,36 @@ def scan_ict():
     usdt = get_usdt_dominance_trend()
     results = []
     for symbol in ICT_SYMBOLS:
-        try:
-            df = yf_data(symbol)
-            if df is None: continue
-            ph, pl = find_pivots(df)
-            signals = detect_sweeps(df, ph, pl)
-            clean = symbol.replace("-USD", "/USDT")
-            for sig in signals:
-                if usdt["bias"] == "bullish":
-                    rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
-                elif usdt["bias"] == "bearish":
-                    rel = "موافق روند" if sig["type"]=="SHORT" else "خلاف روند"
-                else:
-                    rel = "خنثی"
-                results.append({"Symbol": clean, "Signal": sig["type"],
-                                "Score": sig["score"], "Stage": sig["stage"],
-                                "USDT.D Relation": rel,
-                                "Level": round(sig["level"], 8),
-                                "Price": round(sig["price"], 8)})
-        except Exception as e:
-            print(f"ICT {symbol} err: {str(e)[:80]}")
+        for tf in ICT_TF_LIST:
+            try:
+                df = yf_data(symbol, interval=tf)
+                if df is None: continue
+                ph, pl = find_pivots(df)
+                signals = detect_sweeps(df, ph, pl)
+                clean = symbol.replace("-USD", "/USDT")
+                for sig in signals:
+                    if usdt["bias"] == "bullish":
+                        rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
+                    elif usdt["bias"] == "bearish":
+                        rel = "موافق روند" if sig["type"]=="SHORT" else "خلاف روند"
+                    else:
+                        rel = "خنثی"
+                    results.append({"Symbol": clean, "TF": tf, "Signal": sig["type"],
+                                    "Score": sig["score"], "Stage": sig["stage"],
+                                    "USDT.D Relation": rel,
+                                    "Level": round(sig["level"], 8),
+                                    "Price": round(sig["price"], 8)})
+            except Exception as e:
+                print(f"ICT {symbol} {tf} err: {str(e)[:80]}")
     return usdt, pd.DataFrame(results) if results else pd.DataFrame()
 
 def build_message(zdf, usdt, ict_df):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     msg = f"<b>📊 اسکنر ترکیبی</b> — {now}\n\n"
+    
+    # نمایش دامیننس تتر در بالای پیام
+    if usdt["dominance"]:
+        msg += f"<b>USDT.D:</b> {usdt['emoji']} {usdt['trend']} ({usdt['dominance']}%)\n\n"
 
     # --- بخش ZLSMA ---
     if not zdf.empty:
@@ -251,15 +263,11 @@ def build_message(zdf, usdt, ict_df):
 
     # --- بخش ICT ---
     if not ict_df.empty:
-        msg += f"💧 <b>ICT Liquidity Sweep</b> ({len(ict_df)} سیگنال)\n"
-        msg += f"USDT.D: {usdt['emoji']} {usdt['trend']}"
-        if usdt["dominance"]:
-            msg += f" ({usdt['dominance']}%)"
-        msg += "\n\n"
+        msg += f"💧 <b>ICT Liquidity Sweep</b> ({len(ict_df)} سیگنال)\n\n"
         for _, r in ict_df.iterrows():
             emo = "🟢" if r["Signal"] == "LONG" else "🔴"
-            msg += (f"{emo} <code>{r['Symbol']}</code> {r['Signal']} "
-                    f"| ⭐{r['Score']} {r['Stage']} | {r['USDT.D Relation']}\n")
+            msg += (f"{emo} <code>{r['Symbol']}</code> | TF: {r['TF']} | {r['Signal']} "
+                    f"| ⭐{r['Score']} | مرحله: {r['Stage']} | {r['USDT.D Relation']}\n")
         msg += "\n"
 
     if zdf.empty and ict_df.empty:
@@ -272,7 +280,7 @@ def main():
     print(f"Run: {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC\n")
 
     # 1) ZLSMA
-    print("=" * 70); print("ZLSMA Scanner (5 TFs)"); print("=" * 70)
+    print("=" * 70); print("ZLSMA Scanner"); print("=" * 70)
     zdf = scan_zlsma()
     print(zdf.to_string(index=False))
 
@@ -282,16 +290,17 @@ def main():
     print(f"USDT.D: {usdt['emoji']} {usdt['trend']} ({usdt.get('dominance')}%)")
     if not ict_df.empty: print(ict_df.to_string(index=False))
 
-    # 3) منطق ضد اسپم (۲ ساعته + تغییر جهت)
+    # 3) منطق ضد اسپم (۱ ساعته + تغییر جهت)
     state = load_state()
     new_ict = []
     now_ts = time.time()
-    TWO_HOURS = 2 * 60 * 60  # 2 ساعت به ثانیه
+    ONE_HOUR = 1 * 60 * 60  # 1 ساعت به ثانیه
 
     for _, r in ict_df.iterrows() if not ict_df.empty else []:
         sym = r['Symbol']
+        tf = r['TF']
         sig_type = r['Signal'] 
-        key = f"ict_{sym}"
+        key = f"ict_{sym}_{tf}"
         current_sig = f"{sig_type}_{now_ts}"
         
         if key in state:
@@ -299,7 +308,7 @@ def main():
             last_type = last_sig_str.split("_")[0] 
             last_ts = float(last_sig_str.split("_")[1])
             
-            if sig_type != last_type or (now_ts - last_ts) >= TWO_HOURS:
+            if sig_type != last_type or (now_ts - last_ts) >= ONE_HOUR:
                 new_ict.append(r)
                 state[key] = current_sig
         else:
