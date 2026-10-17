@@ -61,9 +61,6 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-# ==========================================
-# دریافت دیتا از yfinance (سریع و بدون بلاک)
-# ==========================================
 def yf_data(symbol, interval, days):
     end = datetime.now(); start = end - timedelta(days=days)
     try:
@@ -74,7 +71,6 @@ def yf_data(symbol, interval, days):
             return None
         df = df[["Open","High","Low","Close"]].dropna()
         df.columns = ["open","high","low","close"]
-        # 🔴 حذف کندل آخر (ناقص)
         return df.iloc[:-1] 
     except Exception as e:
         return None
@@ -111,7 +107,6 @@ def scan_zlsma():
     for sym in ZLSMA_SYMBOLS:
         row = {"Symbol": sym.replace("-USD", "")[:9]}
         for tf_name, tf in ZLSMA_TF.items():
-            # برای تایم فریم 4h به روزهای بیشتری نیاز داریم
             days = 30 if tf == "4h" else 7
             df = yf_data(sym, tf, days)
             
@@ -128,9 +123,6 @@ def scan_zlsma():
     df = df.sort_values("Score", ascending=False).reset_index(drop=True)
     return df
 
-# ==========================================
-# بقیه کدها (ICT و دامیننس)
-# ==========================================
 def get_usdt_dominance_trend():
     tfs = {"15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"}
     results = {}
@@ -294,7 +286,9 @@ def main():
     state = load_state()
     new_ict = []
     now_ts = time.time()
-    ONE_HOUR = 1 * 60 * 60
+    
+    # 🔴 تغییر مهم: زمان ضد اسپم از ۱ ساعت به ۳۰ دقیقه (نیم ساعت) تغییر کرد
+    HALF_HOUR = 30 * 60  # 30 دقیقه به ثانیه (1800 ثانیه)
 
     for _, r in ict_df.iterrows() if not ict_df.empty else []:
         sym = r['Symbol']
@@ -308,7 +302,7 @@ def main():
             last_type = last_sig_str.split("_")[0] 
             last_ts = float(last_sig_str.split("_")[1])
             
-            if sig_type != last_type or (now_ts - last_ts) >= ONE_HOUR:
+            if sig_type != last_type or (now_ts - last_ts) >= HALF_HOUR:
                 new_ict.append(r)
                 state[key] = current_sig
         else:
