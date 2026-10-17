@@ -226,22 +226,30 @@ def scan_ict():
             print(f"ICT {symbol} err: {str(e)[:80]}")
     return usdt, pd.DataFrame(results) if results else pd.DataFrame()
 
-def build_message(zlsma_strong, zlsma_mid, usdt, ict_df):
+def build_message(zdf, usdt, ict_df):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     msg = f"<b>📊 اسکنر ترکیبی</b> — {now}\n\n"
 
-    if zlsma_strong:
-        msg += "🚀🚀 <b>ZLSMA — قوی (۵/۵ تایم صعودی)</b>\n"
-        for s in zlsma_strong:
-            msg += f"• <code>{s}</code> ✅✅✅✅✅ (3m/5m/15m/1h/4h)\n"
-        msg += "\n"
+    # --- بخش ZLSMA ---
+    if not zdf.empty:
+        msg += "📈 <b>ZLSMA Trend (وضعیت ارزها)</b>\n"
+        msg += "<pre>\n"
+        msg += f"{'Symbol':<9} | {'3m':<2} | {'5m':<2} | {'15m':<3} | {'1h':<2} | {'4h':<2} | Score\n"
+        msg += "-" * 45 + "\n"
+        
+        for _, r in zdf.iterrows():
+            sym_short = r['Symbol'].replace("USDT", "")[:9]
+            t3 = "🟢" if r.get('3m') == "UP" else "🔴"
+            t5 = "🟢" if r.get('5m') == "UP" else "🔴"
+            t15 = "🟢" if r.get('15m') == "UP" else "🔴"
+            t1h = "🟢" if r.get('1h') == "UP" else "🔴"
+            t4h = "🟢" if r.get('4h') == "UP" else "🔴"
+            score = int(r['Score'])
+            msg += f"{sym_short:<9} | {t3}  | {t5}  | {t15}  | {t1h}  | {t4h}  | {score}/5\n"
+            
+        msg += "</pre>\n\n"
 
-    if zlsma_mid:
-        msg += "🚀 <b>ZLSMA — متوسط (۴/۵ با 1h و 4h صعودی)</b>\n"
-        for s in zlsma_mid:
-            msg += f"• <code>{s}</code> ✅✅✅✅ (HTF تایید)\n"
-        msg += "\n"
-
+    # --- بخش ICT ---
     if not ict_df.empty:
         msg += f"💧 <b>ICT Liquidity Sweep</b> ({len(ict_df)} سیگنال)\n"
         msg += f"USDT.D: {usdt['emoji']} {usdt['trend']}"
@@ -254,7 +262,7 @@ def build_message(zlsma_strong, zlsma_mid, usdt, ict_df):
                     f"| ⭐{r['Score']} {r['Stage']} | {r['USDT.D Relation']}\n")
         msg += "\n"
 
-    if not zlsma_strong and not zlsma_mid and ict_df.empty:
+    if zdf.empty and ict_df.empty:
         return None
 
     msg += "⚠️ این پیام صرفاً تحلیلی است، نه سیگنال خرید/فروش."
@@ -263,44 +271,50 @@ def build_message(zlsma_strong, zlsma_mid, usdt, ict_df):
 def main():
     print(f"Run: {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC\n")
 
+    # 1) ZLSMA
     print("=" * 70); print("ZLSMA Scanner (5 TFs)"); print("=" * 70)
     zdf = scan_zlsma()
     print(zdf.to_string(index=False))
 
-    state = load_state()
-    zlsma_strong, zlsma_mid = [], []
-    for _, r in zdf.iterrows():
-        sym = r["Symbol"]; key = f"zlsma_{sym}"
-        score = int(r["Score"])
-        htf_ok = (r.get("1h") == "UP" and r.get("4h") == "UP")
-        if score == 5 and state.get(key) != "UP5":
-            zlsma_strong.append(sym); state[key] = "UP5"
-        elif score == 4 and htf_ok and state.get(key) not in ("UP5","UP4"):
-            zlsma_mid.append(sym); state[key] = "UP4"
-        elif score < 4:
-            state[key] = ""
-    print(f"\nZLSMA 5/5: {zlsma_strong}")
-    print(f"ZLSMA 4/5 (HTF): {zlsma_mid}")
-
+    # 2) ICT
     print("\n" + "=" * 70); print("ICT Liquidity Sweep"); print("=" * 70)
     usdt, ict_df = scan_ict()
     print(f"USDT.D: {usdt['emoji']} {usdt['trend']} ({usdt.get('dominance')}%)")
     if not ict_df.empty: print(ict_df.to_string(index=False))
 
+    # 3) منطق ضد اسپم (۲ ساعته + تغییر جهت)
+    state = load_state()
     new_ict = []
-    for _, r in ict_df.iterrows() if not ict_df.empty else []:
-        key = f"ict_{r['Symbol']}_{r['Signal']}"
-        if state.get(key) != "ALERTED":
-            new_ict.append(r); state[key] = "ALERTED"
-    ict_new_df = pd.DataFrame(new_ict) if new_ict else pd.DataFrame()
+    now_ts = time.time()
+    TWO_HOURS = 2 * 60 * 60  # 2 ساعت به ثانیه
 
+    for _, r in ict_df.iterrows() if not ict_df.empty else []:
+        sym = r['Symbol']
+        sig_type = r['Signal'] 
+        key = f"ict_{sym}"
+        current_sig = f"{sig_type}_{now_ts}"
+        
+        if key in state:
+            last_sig_str = state[key]
+            last_type = last_sig_str.split("_")[0] 
+            last_ts = float(last_sig_str.split("_")[1])
+            
+            if sig_type != last_type or (now_ts - last_ts) >= TWO_HOURS:
+                new_ict.append(r)
+                state[key] = current_sig
+        else:
+            new_ict.append(r)
+            state[key] = current_sig
+
+    ict_new_df = pd.DataFrame(new_ict) if new_ict else pd.DataFrame()
     save_state(state)
 
-    msg = build_message(zlsma_strong, zlsma_mid, usdt, ict_new_df)
+    # 4) ارسال پیام
+    msg = build_message(zdf, usdt, ict_new_df)
     if msg:
         print("\nTelegram sent:", send_telegram(msg))
     else:
-        print("\nNo new alerts.")
+        print("\nNo alerts to send.")
 
 if __name__ == "__main__":
     main()
