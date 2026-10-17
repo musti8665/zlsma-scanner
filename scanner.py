@@ -32,7 +32,7 @@ ICT_SYMBOLS = [
     "STX-USD","THETA-USD","RUNE-USD","DOGE-USD","HBAR-USD",
 ]
 ICT_TF_LIST = ["15m", "1h", "4h"] 
-ICT_LOOKBACK_DAYS = 30 # برای تایم 4h و 1d نیاز به تاریخ بیشتری داریم
+ICT_LOOKBACK_DAYS = 30
 PIVOT_LENGTH = 10
 MAX_ACTIVE_LEVELS = 5
 
@@ -71,6 +71,9 @@ def fetch_klines(symbol, interval, limit=200):
         "open_time","open","high","low","close","volume",
         "close_time","qav","trades","tbbav","tbqav","ignore"])
     df["close"] = df["close"].astype(float)
+    # 🔴 اصلاح مهم: حذف آخرین کندل (کندل در حال تشکیل) برای جلوگیری از سیگنال کاذب
+    if len(df) > 1:
+        df = df.iloc[:-1] 
     return df
 
 def linreg(series, length, offset=0):
@@ -120,47 +123,28 @@ def scan_zlsma():
     return df
 
 def get_usdt_dominance_trend():
-    # محاسبه روند دامیننس تتر در چند تایم فریم
     tfs = {"15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"}
     results = {}
     try:
-        # گرفتن دیتای USDT.D از yfinance با تایم فریم های مختلف
-        # نماد تتر در yfinance برای دامیننس معمولا USDT-USD نیست، بلکه باید از دیتای گلوبال استفاده کنیم
-        # اما چون yfinance ساپورت نمیکنه، از روش تغییرات مارکت کپ استفاده میکنیم
-        # برای سادگی در این کد از یک API استفاده میکنیم که تغییرات رو بده
-        # اینجا به صورت پیش‌فرض همه رو خنثی میگذاریم و بعدا آپدیت میکنیم
-        # (برای اینکه کد سنگین نشه، از یک روش ساده استفاده میکنیم)
-        
-        # دریافت دامیننس فعلی
         r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
         data = r.json()["data"]
         r2 = requests.get("https://api.coingecko.com/api/v3/coins/tether", timeout=10)
         usdt_data = r2.json()
         current_dom = (usdt_data["market_data"]["market_cap"]["usd"] / data["total_market_cap"]["usd"]) * 100
-        
-        # چون API رایگان برای تاریخچه دامیننس تتر در تایم فریم های پایین نداریم،
-        # از تغییرات 24 ساعته به عنوان معیار استفاده میکنیم (برای همه تایم فریم ها)
-        # اما برای دقت بیشتر در کد نویسی، از روند فعلی استفاده میکنیم
         usdt_chg_24h = usdt_data["market_data"]["market_cap_change_percentage_24h"]
         market_chg_24h = data["market_cap_change_percentage_24h_usd"]
         
         if usdt_chg_24h > market_chg_24h + 0.1:
-            bias = "bearish" # دامیننس بالا = بده برای کریپتو
-            trend = "📈"
+            bias = "bearish"; trend = "📈"
         elif usdt_chg_24h < market_chg_24h - 0.1:
-            bias = "bullish"
-            trend = "📉"
+            bias = "bullish"; trend = "📉"
         else:
-            bias = "neutral"
-            trend = "➡️"
+            bias = "neutral"; trend = "➡️"
             
-        # برای نمایش در ۴ تایم فریم، فعلا همه رو یکسان نشون میدیم (چون دیتای دقیق نداریم)
         for tf in tfs:
             results[tf] = {"trend": trend, "bias": bias, "emoji": trend}
-            
         return results, round(current_dom, 2)
     except Exception as e:
-        print("USDT.D error:", e)
         for tf in tfs:
             results[tf] = {"trend": "❓", "bias": "neutral", "emoji": "❓"}
         return results, None
@@ -235,7 +219,6 @@ def scan_ict(usdt_tfs):
                 signals = detect_sweeps(df, ph, pl)
                 clean = symbol.replace("-USD", "/USDT")
                 for sig in signals:
-                    # چک کردن با دامیننس تتر در تایم فریم سیگنال
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     if bias == "bullish":
                         rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
@@ -256,13 +239,11 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     msg = f"<b>📊 اسکنر ترکیبی</b> — {now}\n\n"
     
-    # نمایش دامیننس تتر در ۴ تایم فریم
     msg += f"<b>USDT.D ({current_dom}%):</b>\n"
     for tf, data in usdt_tfs.items():
         msg += f"• {tf}: {data['trend']}\n"
     msg += "\n"
 
-    # --- بخش ZLSMA ---
     if not zdf.empty:
         msg += "📈 <b>ZLSMA Trend (وضعیت ارزها)</b>\n"
         msg += "<pre>\n"
@@ -281,7 +262,6 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df):
             
         msg += "</pre>\n\n"
 
-    # --- بخش ICT ---
     if not ict_df.empty:
         msg += f"💧 <b>ICT Liquidity Sweep</b> ({len(ict_df)} سیگنال)\n\n"
         for _, r in ict_df.iterrows():
@@ -299,20 +279,16 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df):
 def main():
     print(f"Run: {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC\n")
 
-    # دریافت وضعیت دامیننس تتر در ۴ تایم فریم
     usdt_tfs, current_dom = get_usdt_dominance_trend()
 
-    # 1) ZLSMA
     print("=" * 70); print("ZLSMA Scanner"); print("=" * 70)
     zdf = scan_zlsma()
     print(zdf.to_string(index=False))
 
-    # 2) ICT
     print("\n" + "=" * 70); print("ICT Liquidity Sweep"); print("=" * 70)
     ict_df = scan_ict(usdt_tfs)
     if not ict_df.empty: print(ict_df.to_string(index=False))
 
-    # 3) منطق ضد اسپم (۱ ساعته + تغییر جهت)
     state = load_state()
     new_ict = []
     now_ts = time.time()
@@ -340,7 +316,6 @@ def main():
     ict_new_df = pd.DataFrame(new_ict) if new_ict else pd.DataFrame()
     save_state(state)
 
-    # 4) ارسال پیام
     msg = build_message(zdf, usdt_tfs, current_dom, ict_new_df)
     if msg:
         print("\nTelegram sent:", send_telegram(msg))
