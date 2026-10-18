@@ -1,5 +1,5 @@
 # ============================================================
-# Combined Scanner: ZLSMA + ICT + Market Structure (via yfinance)
+# Ultimate Scanner: ZLSMA (5 TFs) + ICT + Volume + Chandelier + FVG
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -22,6 +22,7 @@ ZLSMA_SYMBOLS = [
     "HYPE32196-USD", "HBAR-USD", "ALGO-USD", "INJ-USD", "FET-USD", "UNI-USD", "ONDO-USD"
 ]
 
+# 🟢 برگشت به ۵ تایم فریم
 ZLSMA_TF = {"3m":"3m", "5m":"5m", "15m":"15m", "1h":"1h", "4h":"4h"}
 ZLSMA_LEN = 32
 ZLSMA_OFF = 0
@@ -34,10 +35,14 @@ ICT_SYMBOLS = [
     "STX-USD","THETA-USD","RUNE-USD","DOGE-USD","HBAR-USD",
     "HYPE32196-USD", "ALGO-USD", "FET-USD", "UNI-USD", "ONDO-USD"
 ]
-ICT_TF_LIST = ["15m", "1h", "4h"] 
+ICT_TF_LIST = ["5m", "15m", "1h", "4h"] 
 ICT_LOOKBACK_DAYS = 30
 PIVOT_LENGTH = 10
 MAX_ACTIVE_LEVELS = 5
+
+FOLLOW_UP_TIMES = {
+    "5m": 5 * 60, "15m": 15 * 60, "1h": 60 * 60, "4h": 4 * 60 * 60
+}
 
 def send_telegram(msg):
     if not TG_TOKEN or not TG_CHAT:
@@ -72,8 +77,8 @@ def yf_data(symbol, interval, days):
             df.columns = df.columns.get_level_values(0)
         if df.empty or len(df) < 60: 
             return None
-        df = df[["Open","High","Low","Close"]].dropna()
-        df.columns = ["open","high","low","close"]
+        df = df[["Open","High","Low","Close","Volume"]].dropna()
+        df.columns = ["open","high","low","close","volume"]
         return df.iloc[:-1] 
     except Exception as e:
         return None
@@ -99,10 +104,31 @@ def zlsma(series, length=ZLSMA_LEN, offset=ZLSMA_OFF):
     lsma2 = linreg(lsma,   length, offset)
     return lsma + (lsma - lsma2)
 
-def trend_of(series):
-    if len(series) < 2 or pd.isna(series.iloc[-1]) or pd.isna(series.iloc[-2]):
-        return "N/A"
-    return "UP" if series.iloc[-1] > series.iloc[-2] else "DOWN"
+def chandelier_exit(df, period=22, multiplier=3.0):
+    atr = (df['high'] - df['low']).rolling(period).mean()
+    highest_high = df['high'].rolling(period).max()
+    lowest_low = df['low'].rolling(period).min()
+    long_stop = highest_high - (atr * multiplier)
+    short_stop = lowest_low + (atr * multiplier)
+    ce_dir = 1
+    for i in range(period, len(df)):
+        if df['close'].iloc[i] > short_stop.iloc[i-1]:
+            ce_dir = 1
+        elif df['close'].iloc[i] < long_stop.iloc[i-1]:
+            ce_dir = -1
+    return ce_dir
+
+def check_volume(df):
+    if len(df) < 20: return False
+    avg_vol = df['volume'].rolling(20).mean().iloc[-1]
+    last_vol = df['volume'].iloc[-1]
+    return last_vol > avg_vol * 1.2
+
+def check_fvg(df):
+    if len(df) < 3: return False
+    if df['low'].iloc[-1] > df['high'].iloc[-3]: return True
+    if df['high'].iloc[-1] < df['low'].iloc[-3]: return True
+    return False
 
 def scan_zlsma():
     rows = []
@@ -115,9 +141,19 @@ def scan_zlsma():
             
             if df is not None and len(df) >= ZLSMA_LEN:
                 z = zlsma(df["close"])
-                row[tf_name] = trend_of(z)
+                row[tf_name] = "UP" if z.iloc[-1] > z.iloc[-2] else "DOWN"
+                
+                # محاسبه اندیکاتورهای کمکی فقط برای تایم فریم 4h
+                if tf_name == "4h":
+                    row["CE"] = "🟢" if chandelier_exit(df) == 1 else "🔴"
+                    row["Vol"] = "📊" if check_volume(df) else "➖"
+                    row["FVG"] = "⚡" if check_fvg(df) else "➖"
             else:
                 row[tf_name] = "ERR"
+                if tf_name == "4h":
+                    row["CE"] = "⚪"
+                    row["Vol"] = "⚪"
+                    row["FVG"] = "⚪"
             time.sleep(0.1)
         rows.append(row)
         
@@ -163,37 +199,26 @@ def find_pivots(df, length=PIVOT_LENGTH):
             pl.append({"index": i, "price": lows[i]})
     return ph, pl
 
-# 🟢 تابع جدید برای تحلیل ساختار بازار (حمایت/مقاومت)
 def analyze_market_structure(df, ph, pl, current_price):
     resistances = [p["price"] for p in ph if p["price"] > current_price]
     supports = [p["price"] for p in pl if p["price"] < current_price]
-    
     nearest_res = min(resistances) if resistances else None
     nearest_sup = max(supports) if supports else None
     
     if nearest_res and nearest_sup:
         dist_res = (nearest_res - current_price) / current_price * 100
         dist_sup = (current_price - nearest_sup) / current_price * 100
-        
-        if dist_res < dist_sup * 0.5:
-            return f"نزدیک مقاومت (فاصله {dist_res:.2f}%)"
-        elif dist_sup < dist_res * 0.5:
-            return f"نزدیک حمایت (فاصله {dist_sup:.2f}%)"
-        else:
-            return "بین حمایت و مقاومت (وسط)"
-            
-    elif nearest_res:
-        return "بالای حمایت (مقاومت نزدیک نیست)"
-    elif nearest_sup:
-        return "زیر مقاومت (حمایت نزدیک نیست)"
-    else:
-        return "خارج از محدوده (شکست کامل)"
+        if dist_res < dist_sup * 0.5: return f"نزدیک مقاومت (فاصله {dist_res:.2f}%)"
+        elif dist_sup < dist_res * 0.5: return f"نزدیک حمایت (فاصله {dist_sup:.2f}%)"
+        else: return "بین حمایت و مقاومت (وسط)"
+    elif nearest_res: return "بالای حمایت (مقاومت نزدیک نیست)"
+    elif nearest_sup: return "زیر مقاومت (حمایت نزدیک نیست)"
+    else: return "خارج از محدوده (شکست کامل)"
 
 def calculate_stage(df, level, signal_type):
     current_price = df["close"].iloc[-1]
     atr = (df["high"] - df["low"]).rolling(14).mean().iloc[-1]
-    if atr == 0 or np.isnan(atr):
-        atr = abs(df["close"].iloc[-1] - df["close"].iloc[-20]) / 20
+    if atr == 0 or np.isnan(atr): atr = abs(df["close"].iloc[-1] - df["close"].iloc[-20]) / 20
     distance = (current_price - level) if signal_type == "LONG" else (level - current_price)
     move_score = min(10, max(1, int((distance / atr) * 3.5)))
     bars_since = 0
@@ -236,34 +261,26 @@ def scan_ict(usdt_tfs):
                 ph, pl = find_pivots(df)
                 signals = detect_sweeps(df, ph, pl)
                 clean = symbol.replace("-USD", "/USDT").replace("32196", "")
-                
-                # 🟢 تحلیل ساختار بازار برای این ارز و تایم فریم
                 current_price = df["close"].iloc[-1]
                 market_structure = analyze_market_structure(df, ph, pl, current_price)
 
                 for sig in signals:
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "❓"
-                    
-                    if bias == "bullish":
-                        rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
-                    elif bias == "bearish":
-                        rel = "موافق روند" if sig["type"]=="SHORT" else "خلاف روند"
-                    else:
-                        rel = "خنثی"
+                    if bias == "bullish": rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
+                    elif bias == "bearish": rel = "موافق روند" if sig["type"]=="SHORT" else "خلاف روند"
+                    else: rel = "خنثی"
                     
                     results.append({"Symbol": clean, "TF": tf, "Signal": sig["type"],
                                     "Score": sig["score"], "Stage": sig["stage"],
                                     "Market Structure": market_structure,
-                                    "USDT.D Relation": rel,
-                                    "USDT.D Trend": trend_emoji,
-                                    "Level": round(sig["level"], 8),
-                                    "Price": round(sig["price"], 8)})
+                                    "USDT.D Relation": rel, "USDT.D Trend": trend_emoji,
+                                    "Entry Price": sig["price"], "Timestamp": time.time()})
             except Exception as e:
                 print(f"ICT {symbol} {tf} err: {str(e)[:80]}")
     return pd.DataFrame(results) if results else pd.DataFrame()
 
-def build_message(zdf, usdt_tfs, current_dom, ict_df):
+def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     msg = f"<b>📊 اسکنر ترکیبی</b> — {now}\n\n"
     
@@ -273,10 +290,11 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df):
     msg += "\n"
 
     if not zdf.empty:
-        msg += "📈 <b>ZLSMA Trend (وضعیت ارزها)</b>\n"
+        msg += "📈 <b>ZLSMA Trend (5 TFs)</b>\n"
         msg += "<pre>\n"
-        msg += f"{'Symbol':<9} | {'3m':<2} | {'5m':<2} | {'15m':<3} | {'1h':<2} | {'4h':<2} | Score\n"
-        msg += "-" * 45 + "\n"
+        # 🟢 هدر جدول با ۵ تایم فریم و ۳ ستون کمکی
+        msg += f"{'Symbol':<9}|{'3m':<2}|{'5m':<2}|{'15m':<3}|{'1h':<2}|{'4h':<2}|{'CE':<2}|{'Vol':<3}|{'FVG':<3}|Scr\n"
+        msg += "-" * 55 + "\n"
         
         def get_icon(val):
             if val == "UP": return "🟢"
@@ -290,23 +308,38 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df):
             t15 = get_icon(r.get('15m'))
             t1h = get_icon(r.get('1h'))
             t4h = get_icon(r.get('4h'))
+            ce = r.get('CE', '⚪')
+            vol = r.get('Vol', '⚪')
+            fvg = r.get('FVG', '⚪')
             score = int(r['Score'])
-            msg += f"{sym_short:<9} | {t3}  | {t5}  | {t15}  | {t1h}  | {t4h}  | {score}/5\n"
+            msg += f"{sym_short:<9}|{t3} |{t5} |{t15}  |{t1h} |{t4h} |{ce} |{vol}  |{fvg}  |{score}/5\n"
             
         msg += "</pre>\n\n"
+        msg += "راهنما: CE=Chandelier, Vol=حجم, FVG=شکاف ارزش\n\n"
+
+    if follow_ups:
+        msg += "🔎 <b>نتیجه سیگنال‌های قبلی:</b>\n"
+        for f in follow_ups:
+            status = "✅ سود" if f["profit"] > 0 else "❌ ضرر"
+            if f["TF"] == "5m": time_str = "۵ دقیقه"
+            elif f["TF"] == "15m": time_str = "۱۵ دقیقه"
+            elif f["TF"] == "1h": time_str = "۱ ساعت"
+            else: time_str = "۴ ساعت"
+            msg += (f"• <code>{f['Symbol']}</code> | {f['Signal']} | TF: {f['TF']} "
+                    f"| پس از {time_str}: {f['profit']:+.2f}% {status}\n")
+        msg += "\n"
 
     if not ict_df.empty:
         msg += f"💧 <b>ICT Liquidity Sweep</b> ({len(ict_df)} سیگنال)\n\n"
         for _, r in ict_df.iterrows():
             emo = "🟢" if r["Signal"] == "LONG" else "🔴"
-            # 🟢 اضافه شدن ساختار بازار و توضیح دامیننس تتر
             msg += (f"{emo} <code>{r['Symbol']}</code> | TF: {r['TF']} | {r['Signal']} "
                     f"| ⭐{r['Score']} | مرحله: {r['Stage']}\n"
                     f"   📍 ساختار: {r['Market Structure']}\n"
                     f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n")
         msg += "\n"
 
-    if zdf.empty and ict_df.empty:
+    if zdf.empty and ict_df.empty and not follow_ups:
         return None
 
     msg += "⚠️ این پیام صرفاً تحلیلی است، نه سیگنال خرید/فروش."
@@ -317,7 +350,7 @@ def main():
 
     usdt_tfs, current_dom = get_usdt_dominance_trend()
 
-    print("=" * 70); print("ZLSMA Scanner (via yfinance)"); print("=" * 70)
+    print("=" * 70); print("ZLSMA Ultimate Scanner (5 TFs)"); print("=" * 70)
     zdf = scan_zlsma()
     print(zdf.to_string(index=False))
 
@@ -326,34 +359,60 @@ def main():
     if not ict_df.empty: print(ict_df.to_string(index=False))
 
     state = load_state()
-    new_ict = []
+    follow_ups = []
     now_ts = time.time()
-    
+    keys_to_remove = []
+
+    for key, data in state.items():
+        if key.startswith("ict_") and isinstance(data, dict) and "timestamp" in data:
+            tf = data["TF"]
+            if tf in FOLLOW_UP_TIMES:
+                elapsed = now_ts - data["timestamp"]
+                if elapsed >= FOLLOW_UP_TIMES[tf]:
+                    current_df = yf_data(data["Symbol"] + "-USD", tf, 7)
+                    if current_df is not None and len(current_df) > 0:
+                        current_price = current_df["close"].iloc[-1]
+                        entry_price = data["Entry Price"]
+                        if data["Signal"] == "LONG":
+                            profit = (current_price - entry_price) / entry_price * 100
+                        else:
+                            profit = (entry_price - current_price) / entry_price * 100
+                        follow_ups.append({
+                            "Symbol": data["Symbol"], "TF": tf, 
+                            "Signal": data["Signal"], "profit": profit
+                        })
+                    keys_to_remove.append(key)
+
+    for k in keys_to_remove:
+        del state[k]
+
+    new_ict = []
     HALF_HOUR = 30 * 60
 
     for _, r in ict_df.iterrows() if not ict_df.empty else []:
-        sym = r['Symbol']
-        tf = r['TF']
-        sig_type = r['Signal'] 
+        sym = r['Symbol']; tf = r['TF']; sig_type = r['Signal'] 
         key = f"ict_{sym}_{tf}"
-        current_sig = f"{sig_type}_{now_ts}"
         
+        is_new = False
         if key in state:
-            last_sig_str = state[key]
-            last_type = last_sig_str.split("_")[0] 
-            last_ts = float(last_sig_str.split("_")[1])
-            
+            last_type = state[key].get("Signal")
+            last_ts = state[key].get("timestamp", 0)
             if sig_type != last_type or (now_ts - last_ts) >= HALF_HOUR:
-                new_ict.append(r)
-                state[key] = current_sig
+                is_new = True
         else:
+            is_new = True
+            
+        if is_new:
             new_ict.append(r)
-            state[key] = current_sig
+            state[key] = {
+                "Symbol": sym, "TF": tf, "Signal": sig_type,
+                "Entry Price": r["Entry Price"], "timestamp": now_ts
+            }
 
     ict_new_df = pd.DataFrame(new_ict) if new_ict else pd.DataFrame()
     save_state(state)
 
-    msg = build_message(zdf, usdt_tfs, current_dom, ict_new_df)
+    msg = build_message(zdf, usdt_tfs, current_dom, ict_new_df, follow_ups)
     if msg:
         print("\nTelegram sent:", send_telegram(msg))
     else:
