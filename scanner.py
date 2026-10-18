@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ZLSMA (via Bybit) + ICT (via yfinance)
+# Ultimate Scanner: ZLSMA (via Kraken) + ICT (via yfinance)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -13,20 +13,21 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
-# 🟢 برگرداندن تمام ارزها (فرمت Bybit)
+# 🟢 ZLSMA Symbols (Kraken format: SHIBUSD, XBTUSD, ...)
+# برای ارزهایی که در Kraken نیستند، ERR نمایش داده می‌شود
 ZLSMA_SYMBOLS = [
-    "SHIBUSDT","PEOPLEUSDT","ZECUSDT","ARKMUSDT","MYXUSDT","TIAUSDT",
-    "ICPUSDT","RUNEUSDT","DOGSUSDT","BOMEUSDT","SEIUSDT",
-    "NOTUSDT","APTUSDT","WIFUSDT","AVAXUSDT","WLDUSDT","MEMEUSDT","PEPEUSDT",
-    "ARUSDT","ADAUSDT","NEARUSDT","OPUSDT","SUIUSDT","BONKUSDT","CKBUSDT",
-    "HYPEUSDT", "HBARUSDT", "ALGOUSDT", "INJUSDT", "FETUSDT", "UNIUSDT", "ONDOUSDT"
+    "SHIBUSD","PEOPLEUSD","ZECUSD","ARKMUSD","TIAUSD",
+    "ICPUSD","RUNEUSD","BOMEUSD","SEIUSD",
+    "NOTUSD","WIFUSD","AVAXUSD","WLDUSD","MEMEUSD",
+    "ARUSD","ADAUSD","NEARUSD","OPUSD","BONKUSD","CKBUSD",
+    "HBARUSD", "ALGOUSD", "INJUSD", "FETUSD", "ONDOUSD"
 ]
 
-# 🟢 نگاشت تایم‌فریم‌ها به فرمت Bybit
-ZLSMA_TF = {"3m":"3", "5m":"5", "15m":"15", "1h":"60", "4h":"240"}
+# 🟢 نگاشت تایم‌فریم‌ها به فرمت Kraken (دقیقه)
+ZLSMA_TF = {"5m":"5", "15m":"15", "1h":"60", "4h":"240"}
 ZLSMA_LEN = 32
 ZLSMA_OFF = 0
-BYBIT_BASE = "https://api.bybit.com"
+KRAKEN_BASE = "https://api.kraken.com/0/public/OHLC"
 
 # 🟢 ICT Symbols (yfinance format)
 ICT_SYMBOLS = [
@@ -71,44 +72,42 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 # ==========================================
-# 🟢 دریافت دیتا از Bybit (برای ZLSMA)
+# 🟢 دریافت دیتا از Kraken (برای ZLSMA)
 # ==========================================
-def fetch_bybit_klines(symbol, interval, limit=200):
+def fetch_kraken_klines(symbol, interval, limit=200):
     try:
-        url = f"{BYBIT_BASE}/v5/market/kline"
-        params = {
-            "category": "spot",
-            "symbol": symbol,
-            "interval": interval,
-            "limit": limit
-        }
-        r = requests.get(url, params=params, timeout=15)
+        params = {"pair": symbol, "interval": interval}
+        r = requests.get(KRAKEN_BASE, params=params, timeout=15)
         r.raise_for_status()
         data = r.json()
         
-        if data.get("retCode") != 0:
-            print(f"Bybit Error {symbol} {interval}: {data.get('retMsg')}")
+        if data.get("error"):
+            print(f"Kraken Error {symbol} {interval}: {data['error']}")
             return None
             
-        klines = data["result"]["list"]
+        result = data.get("result", {})
+        # پیدا کردن کلید اصلی (Kraken گاهی کلید را تغییر می‌دهد)
+        pair_keys = [k for k in result.keys() if k != "last"]
+        if not pair_keys:
+            return None
+            
+        klines = result[pair_keys[0]]
         if not klines:
             return None
             
-        # Bybit returns newest first, so we reverse it to oldest first
-        klines.reverse()
-        
+        # Kraken format: [time, open, high, low, close, vwap, volume, count]
         df = pd.DataFrame(klines, columns=[
-            "open_time","open","high","low","close","volume","turnover"
+            "time","open","high","low","close","vwap","volume","count"
         ])
-        df["close"] = df["close"].astype(float)
-        df["volume"] = df["volume"].astype(float)
+        for col in ["open","high","low","close","volume"]:
+            df[col] = df[col].astype(float)
         
-        # 🔴 حذف آخرین کندل (کندل در حال تشکیل)
+        # حذف آخرین کندل (کندل در حال تشکیل)
         if len(df) > 1:
             df = df.iloc[:-1]
         return df
     except Exception as e:
-        print(f"Bybit fetch error {symbol} {interval}: {e}")
+        print(f"Kraken fetch error {symbol} {interval}: {e}")
         return None
 
 def linreg(series, length, offset=0):
@@ -162,9 +161,9 @@ def scan_zlsma():
     rows = []
     tf_keys = list(ZLSMA_TF.keys())
     for sym in ZLSMA_SYMBOLS:
-        row = {"Symbol": sym.replace("USDT", "")[:9]}
+        row = {"Symbol": sym.replace("USD", "")[:9]}
         for tf_name, tf_code in ZLSMA_TF.items():
-            df = fetch_bybit_klines(sym, tf_code, limit=200)
+            df = fetch_kraken_klines(sym, tf_code, limit=200)
             
             if df is not None and len(df) >= ZLSMA_LEN:
                 z = zlsma(df["close"])
@@ -181,7 +180,7 @@ def scan_zlsma():
                 if tf_name in ["1h", "4h"]:
                     row[f"CE_{tf_name}"] = "⚪"
                     row[f"VF_{tf_name}"] = "⚪"
-            time.sleep(0.1)
+            time.sleep(1.0)  # Kraken rate limit: 1 request per second
         rows.append(row)
         
     df = pd.DataFrame(rows)
@@ -333,10 +332,10 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
     msg += "\n"
 
     if not zdf.empty:
-        msg += "📈 <b>ZLSMA Trend (5 TFs + Ind.)</b>\n"
+        msg += "📈 <b>ZLSMA Trend (4 TFs + Ind.)</b>\n"
         msg += "<pre>\n"
-        msg += f"{'Sym':<8}|{'3m':<2}|{'5m':<2}|{'15m':<3}|{'1h':<2}|{'4h':<2}|{'CE':<7}|{'V/FVG':<9}|Scr\n"
-        msg += "-" * 60 + "\n"
+        msg += f"{'Sym':<8}|{'5m':<2}|{'15m':<3}|{'1h':<2}|{'4h':<2}|{'CE':<7}|{'V/FVG':<9}|Scr\n"
+        msg += "-" * 55 + "\n"
         
         def get_icon(val):
             if val == "UP": return "🟢"
@@ -345,7 +344,6 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
 
         for _, r in zdf.iterrows():
             sym_short = r['Symbol'][:8]
-            t3 = get_icon(r.get('3m'))
             t5 = get_icon(r.get('5m'))
             t15 = get_icon(r.get('15m'))
             t1h = get_icon(r.get('1h'))
@@ -360,7 +358,7 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
             vf_str = f"{vf_1h}|{vf_4h}"
             
             score = int(r['Score'])
-            msg += f"{sym_short:<8}|{t3} |{t5} |{t15}  |{t1h} |{t4h} |{ce_str:<7}|{vf_str:<9}|{score}/5\n"
+            msg += f"{sym_short:<8}|{t5} |{t15}  |{t1h} |{t4h} |{ce_str:<7}|{vf_str:<9}|{score}/4\n"
             
         msg += "</pre>\n\n"
         msg += "راهنما: CE=Chandelier (1h,4h) | V/FVG=حجم+شکاف ارزش (1h|4h)\n\n"
@@ -398,7 +396,7 @@ def main():
 
     usdt_tfs, current_dom = get_usdt_dominance_trend()
 
-    print("=" * 70); print("ZLSMA Ultimate Scanner (via Bybit)"); print("=" * 70)
+    print("=" * 70); print("ZLSMA Ultimate Scanner (via Kraken)"); print("=" * 70)
     zdf = scan_zlsma()
     print(zdf.to_string(index=False))
 
