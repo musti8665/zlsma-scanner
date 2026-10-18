@@ -173,9 +173,6 @@ def scan_zlsma():
     df = df.sort_values("Score", ascending=False).reset_index(drop=True)
     return df
 
-# ==========================================
-# 🟢 محاسبه دقیق دامیننس تتر در هر تایم‌فریم
-# ==========================================
 def get_usdt_dominance_trend():
     tfs = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"}
     results = {}
@@ -304,8 +301,7 @@ def scan_ict(usdt_tfs):
                 
                 valid_signals = []
                 for sig in signals:
-                    if sig["type"] == "LONG" and "نزدیک مقاومت" in market_structure: continue
-                    if sig["type"] == "SHORT" and "نزدیک حمایت" in market_structure: continue
+                    # به جای حذف کامل، فقط علامت هشدار میدهیم
                     valid_signals.append(sig)
                 
                 if len(valid_signals) > 1:
@@ -432,9 +428,12 @@ def main():
             if tf in FOLLOW_UP_TIMES:
                 elapsed = now_ts - data["timestamp"]
                 if elapsed >= FOLLOW_UP_TIMES[tf]:
-                    current_df = yf_data(data["Symbol"] + "-USD", tf, 7)
-                    if current_df is not None and len(current_df) > 0:
-                        current_price = current_df["close"].iloc[-1]
+                    current_df = yf.download(data["Symbol"] + "-USD", period="7d", interval=tf, progress=False)
+                    if isinstance(current_df.columns, pd.MultiIndex):
+                        current_df.columns = current_df.columns.get_level_values(0)
+                    if not current_df.empty and len(current_df) > 0:
+                        current_df = current_df.iloc[:-1]
+                        current_price = current_df["Close"].iloc[-1]
                         entry_price = data["Entry Price"]
                         if data["Signal"] == "LONG":
                             profit = (current_price - entry_price) / entry_price * 100
@@ -461,6 +460,7 @@ def main():
         if key in state and isinstance(state[key], dict):
             last_type = state[key].get("Signal")
             last_ts = state[key].get("timestamp", 0)
+            # فقط اگر جهت عوض شد یا ۱۵ دقیقه گذشت
             if sig_type != last_type or (now_ts - last_ts) >= FIFTEEN_MIN:
                 is_new = True
         else:
