@@ -1,5 +1,5 @@
 # ============================================================
-# Combined Scanner: ZLSMA (via Bybit) + ICT (via yfinance)
+# Combined Scanner: ZLSMA + ICT + Market Structure (via yfinance)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -13,19 +13,18 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
-# 🟢 ZLSMA Symbols (Bybit format)
+# 🟢 ZLSMA Symbols (yfinance format)
 ZLSMA_SYMBOLS = [
-    "SHIBUSDT","PEOPLEUSDT","ZECUSDT","ARKMUSDT","MYXUSDT","TIAUSDT",
-    "ICPUSDT","RUNEUSDT","DOGSUSDT","BOMEUSDT","SEIUSDT",
-    "NOTUSDT","APTUSDT","WIFUSDT","AVAXUSDT","WLDUSDT","MEMEUSDT","PEPEUSDT",
-    "ARUSDT","ADAUSDT","NEARUSDT","OPUSDT","SUIUSDT","BONKUSDT","CKBUSDT",
-    "HYPEUSDT", "HBARUSDT", "ALGOUSDT", "INJUSDT", "FETUSDT", "UNIUSDT", "ONDOUSDT"
+    "SHIB-USD","PEOPLE-USD","ZEC-USD","ARKM-USD","MYX-USD","TIA-USD",
+    "ICP-USD","RUNE-USD","DOGS-USD","BOME-USD","SEI-USD",
+    "NOT-USD","APT-USD","WIF-USD","AVAX-USD","WLD-USD","MEME-USD","PEPE-USD",
+    "AR-USD","ADA-USD","NEAR-USD","OP-USD","SUI-USD","BONK-USD","CKB-USD",
+    "HYPE32196-USD", "HBAR-USD", "ALGO-USD", "INJ-USD", "FET-USD", "UNI-USD", "ONDO-USD"
 ]
 
-ZLSMA_TF = {"3m":"3", "5m":"5", "15m":"15", "1h":"60", "4h":"240"}
+ZLSMA_TF = {"3m":"3m", "5m":"5m", "15m":"15m", "1h":"1h", "4h":"4h"}
 ZLSMA_LEN = 32
 ZLSMA_OFF = 0
-BYBIT_BASE = "https://api.bybit.com"
 
 # 🟢 ICT Symbols (yfinance format)
 ICT_SYMBOLS = [
@@ -65,45 +64,18 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-# ==========================================
-# 🟢 دریافت دیتا از Bybit (جایگزین yfinance برای ZLSMA)
-# ==========================================
-def fetch_bybit_klines(symbol, interval, limit=200):
+def yf_data(symbol, interval, days):
+    end = datetime.now(); start = end - timedelta(days=days)
     try:
-        url = f"{BYBIT_BASE}/v5/market/kline"
-        params = {
-            "category": "spot",
-            "symbol": symbol,
-            "interval": interval,
-            "limit": limit
-        }
-        r = requests.get(url, params=params, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        
-        if data.get("retCode") != 0:
-            print(f"Bybit Error {symbol} {interval}: {data.get('retMsg')}")
+        df = yf.download(symbol, start=start, end=end, interval=interval, progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        if df.empty or len(df) < 60: 
             return None
-            
-        klines = data["result"]["list"]
-        if not klines:
-            return None
-            
-        # Bybit returns newest first, so we reverse it to oldest first
-        klines.reverse()
-        
-        # Columns: startTime, open, high, low, close, volume, turnover
-        df = pd.DataFrame(klines, columns=[
-            "open_time","open","high","low","close","volume","turnover"
-        ])
-        df["close"] = df["close"].astype(float)
-        
-        # 🔴 حذف آخرین کندل (کندل در حال تشکیل)
-        if len(df) > 1:
-            df = df.iloc[:-1]
-        return df
+        df = df[["Open","High","Low","Close"]].dropna()
+        df.columns = ["open","high","low","close"]
+        return df.iloc[:-1] 
     except Exception as e:
-        print(f"Bybit fetch error {symbol} {interval}: {e}")
         return None
 
 def linreg(series, length, offset=0):
@@ -136,9 +108,10 @@ def scan_zlsma():
     rows = []
     tf_keys = list(ZLSMA_TF.keys())
     for sym in ZLSMA_SYMBOLS:
-        row = {"Symbol": sym.replace("USDT", "")[:9]}
-        for tf_name, tf_code in ZLSMA_TF.items():
-            df = fetch_bybit_klines(sym, tf_code, limit=200)
+        row = {"Symbol": sym.replace("-USD", "").replace("32196", "")[:9]}
+        for tf_name, tf in ZLSMA_TF.items():
+            days = 30 if tf == "4h" else 7
+            df = yf_data(sym, tf, days)
             
             if df is not None and len(df) >= ZLSMA_LEN:
                 z = zlsma(df["close"])
@@ -166,11 +139,11 @@ def get_usdt_dominance_trend():
         market_chg_24h = data["market_cap_change_percentage_24h_usd"]
         
         if usdt_chg_24h > market_chg_24h + 0.1:
-            bias = "bearish"; trend = "📈"
+            bias = "bearish"; trend = "📈 (صعودی - ریسک‌گریز)"
         elif usdt_chg_24h < market_chg_24h - 0.1:
-            bias = "bullish"; trend = "📉"
+            bias = "bullish"; trend = "📉 (نزولی - ریسک‌پذیر)"
         else:
-            bias = "neutral"; trend = "➡️"
+            bias = "neutral"; trend = "➡️ (خنثی)"
             
         for tf in tfs:
             results[tf] = {"trend": trend, "bias": bias, "emoji": trend}
@@ -179,22 +152,6 @@ def get_usdt_dominance_trend():
         for tf in tfs:
             results[tf] = {"trend": "❓", "bias": "neutral", "emoji": "❓"}
         return results, None
-
-# ==========================================
-# 🟡 ICT (بدون تغییر، از yfinance)
-# ==========================================
-def yf_data(symbol, interval, days=ICT_LOOKBACK_DAYS):
-    end = datetime.now(); start = end - timedelta(days=days)
-    try:
-        df = yf.download(symbol, start=start, end=end, interval=interval, progress=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        if df.empty or len(df) < 60: return None
-        df = df[["Open","High","Low","Close"]].dropna()
-        df.columns = ["open","high","low","close"]
-        return df.iloc[:-1]
-    except:
-        return None
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -205,6 +162,32 @@ def find_pivots(df, length=PIVOT_LENGTH):
         if lows[i] == np.min(lows[i-length:i+length+1]):
             pl.append({"index": i, "price": lows[i]})
     return ph, pl
+
+# 🟢 تابع جدید برای تحلیل ساختار بازار (حمایت/مقاومت)
+def analyze_market_structure(df, ph, pl, current_price):
+    resistances = [p["price"] for p in ph if p["price"] > current_price]
+    supports = [p["price"] for p in pl if p["price"] < current_price]
+    
+    nearest_res = min(resistances) if resistances else None
+    nearest_sup = max(supports) if supports else None
+    
+    if nearest_res and nearest_sup:
+        dist_res = (nearest_res - current_price) / current_price * 100
+        dist_sup = (current_price - nearest_sup) / current_price * 100
+        
+        if dist_res < dist_sup * 0.5:
+            return f"نزدیک مقاومت (فاصله {dist_res:.2f}%)"
+        elif dist_sup < dist_res * 0.5:
+            return f"نزدیک حمایت (فاصله {dist_sup:.2f}%)"
+        else:
+            return "بین حمایت و مقاومت (وسط)"
+            
+    elif nearest_res:
+        return "بالای حمایت (مقاومت نزدیک نیست)"
+    elif nearest_sup:
+        return "زیر مقاومت (حمایت نزدیک نیست)"
+    else:
+        return "خارج از محدوده (شکست کامل)"
 
 def calculate_stage(df, level, signal_type):
     current_price = df["close"].iloc[-1]
@@ -253,6 +236,11 @@ def scan_ict(usdt_tfs):
                 ph, pl = find_pivots(df)
                 signals = detect_sweeps(df, ph, pl)
                 clean = symbol.replace("-USD", "/USDT").replace("32196", "")
+                
+                # 🟢 تحلیل ساختار بازار برای این ارز و تایم فریم
+                current_price = df["close"].iloc[-1]
+                market_structure = analyze_market_structure(df, ph, pl, current_price)
+
                 for sig in signals:
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "❓"
@@ -266,6 +254,7 @@ def scan_ict(usdt_tfs):
                     
                     results.append({"Symbol": clean, "TF": tf, "Signal": sig["type"],
                                     "Score": sig["score"], "Stage": sig["stage"],
+                                    "Market Structure": market_structure,
                                     "USDT.D Relation": rel,
                                     "USDT.D Trend": trend_emoji,
                                     "Level": round(sig["level"], 8),
@@ -310,8 +299,11 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df):
         msg += f"💧 <b>ICT Liquidity Sweep</b> ({len(ict_df)} سیگنال)\n\n"
         for _, r in ict_df.iterrows():
             emo = "🟢" if r["Signal"] == "LONG" else "🔴"
+            # 🟢 اضافه شدن ساختار بازار و توضیح دامیننس تتر
             msg += (f"{emo} <code>{r['Symbol']}</code> | TF: {r['TF']} | {r['Signal']} "
-                    f"| ⭐{r['Score']} | مرحله: {r['Stage']} | USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n")
+                    f"| ⭐{r['Score']} | مرحله: {r['Stage']}\n"
+                    f"   📍 ساختار: {r['Market Structure']}\n"
+                    f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n")
         msg += "\n"
 
     if zdf.empty and ict_df.empty:
@@ -325,7 +317,7 @@ def main():
 
     usdt_tfs, current_dom = get_usdt_dominance_trend()
 
-    print("=" * 70); print("ZLSMA Scanner (via Bybit)"); print("=" * 70)
+    print("=" * 70); print("ZLSMA Scanner (via yfinance)"); print("=" * 70)
     zdf = scan_zlsma()
     print(zdf.to_string(index=False))
 
