@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ZLSMA + ICT + Smart USDT.D (Fixed)
+# Ultimate Scanner: ICT Only + Smart USDT.D (RSI + EMA + BB)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -12,19 +12,6 @@ import yfinance as yf
 TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
-
-ZLSMA_SYMBOLS = [
-    "SHIBUSD","PEOPLEUSD","ZECUSD","ARKMUSD","TIAUSD",
-    "ICPUSD","RUNEUSD","BOMEUSD","SEIUSD",
-    "NOTUSD","WIFUSD","AVAXUSD","WLDUSD","MEMEUSD",
-    "ARUSD","ADAUSD","NEARUSD","OPUSD","BONKUSD","CKBUSD",
-    "HBARUSD", "ALGOUSD", "INJUSD", "FETUSD", "ONDOUSD"
-]
-
-ZLSMA_TF = {"5m":"5", "15m":"15", "1h":"60", "4h":"240"}
-ZLSMA_LEN = 32
-ZLSMA_OFF = 0
-KRAKEN_BASE = "https://api.kraken.com/0/public/OHLC"
 
 ICT_SYMBOLS = [
     "SHIB-USD","ICP-USD","SEI-USD","NOT-USD","WIF-USD","AVAX-USD",
@@ -59,139 +46,26 @@ def send_telegram(msg):
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
-            with open(STATE_FILE) as f: return json.load(f)
-        except Exception: return {}
+            with open(STATE_FILE) as f:
+                data = json.load(f)
+                if isinstance(data, dict): return data
+        except Exception:
+            pass
     return {}
 
 def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-def fetch_kraken_klines(symbol, interval, limit=200):
-    try:
-        params = {"pair": symbol, "interval": interval}
-        r = requests.get(KRAKEN_BASE, params=params, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        if data.get("error"):
-            print(f"Kraken Error {symbol} {interval}: {data['error']}")
-            return None
-        result = data.get("result", {})
-        pair_keys = [k for k in result.keys() if k != "last"]
-        if not pair_keys: return None
-        klines = result[pair_keys[0]]
-        if not klines: return None
-        df = pd.DataFrame(klines, columns=[
-            "time","open","high","low","close","vwap","volume","count"
-        ])
-        for col in ["open","high","low","close","volume"]:
-            df[col] = df[col].astype(float)
-        if len(df) > 1:
-            df = df.iloc[:-1]
-        return df
-    except Exception as e:
-        print(f"Kraken fetch error {symbol} {interval}: {e}")
-        return None
-
-def linreg(series, length, offset=0):
-    s = series.shift(offset)
-    x = pd.Series(range(length), dtype=float)
-    x_mean = x.mean()
-    denom = ((x - x_mean) ** 2).sum()
-    out = pd.Series(index=series.index, dtype=float)
-    vals = s.values
-    for i in range(length - 1, len(vals)):
-        y = vals[i - length + 1: i + 1]
-        if pd.isna(y).any(): continue
-        y_mean = y.mean()
-        slope = ((x - x_mean) * (y - y_mean)).sum() / denom
-        intercept = y_mean - slope * x_mean
-        out.iloc[i] = intercept + slope * (length - 1)
-    return out
-
-def zlsma(series, length=ZLSMA_LEN, offset=ZLSMA_OFF):
-    lsma  = linreg(series, length, offset)
-    lsma2 = linreg(lsma,   length, offset)
-    return lsma + (lsma - lsma2)
-
-def chandelier_exit(df, period=22, multiplier=3.0):
-    atr = (df['high'] - df['low']).rolling(period).mean()
-    highest_high = df['high'].rolling(period).max()
-    lowest_low = df['low'].rolling(period).min()
-    long_stop = highest_high - (atr * multiplier)
-    short_stop = lowest_low + (atr * multiplier)
-    ce_dir = 1
-    for i in range(period, len(df)):
-        if df['close'].iloc[i] > short_stop.iloc[i-1]:
-            ce_dir = 1
-        elif df['close'].iloc[i] < long_stop.iloc[i-1]:
-            ce_dir = -1
-    return ce_dir
-
-def check_volume(df):
-    if len(df) < 20: return False
-    avg_vol = df['volume'].rolling(20).mean().iloc[-1]
-    last_vol = df['volume'].iloc[-1]
-    return last_vol > avg_vol * 1.2
-
-def check_fvg(df):
-    if len(df) < 3: return False
-    if df['low'].iloc[-1] > df['high'].iloc[-3]: return True
-    if df['high'].iloc[-1] < df['low'].iloc[-3]: return True
-    return False
-
-def scan_zlsma():
-    rows = []
-    tf_keys = list(ZLSMA_TF.keys())
-    for sym in ZLSMA_SYMBOLS:
-        row = {"Symbol": sym.replace("USD", "")[:9]}
-        for tf_name, tf_code in ZLSMA_TF.items():
-            df = fetch_kraken_klines(sym, tf_code, limit=200)
-            
-            if df is not None and len(df) >= ZLSMA_LEN:
-                z = zlsma(df["close"])
-                row[tf_name] = "UP" if z.iloc[-1] > z.iloc[-2] else "DOWN"
-                
-                if tf_name in ["1h", "4h"]:
-                    ce = "🟢" if chandelier_exit(df) == 1 else "🔴"
-                    vol = "📊" if check_volume(df) else "➖"
-                    fvg = "⚡" if check_fvg(df) else "➖"
-                    row[f"CE_{tf_name}"] = ce
-                    row[f"Vol_{tf_name}"] = vol
-                    row[f"FVG_{tf_name}"] = fvg
-            else:
-                row[tf_name] = "ERR"
-                if tf_name in ["1h", "4h"]:
-                    row[f"CE_{tf_name}"] = "⚪"
-                    row[f"Vol_{tf_name}"] = "⚪"
-                    row[f"FVG_{tf_name}"] = "⚪"
-            time.sleep(1.0)
-        rows.append(row)
-        
-    df = pd.DataFrame(rows)
-    df["Score"] = (df[tf_keys] == "UP").sum(axis=1)
-    df = df.sort_values("Score", ascending=False).reset_index(drop=True)
-    return df
-
 # ==========================================
-# 🟢 محاسبه دستی و دقیق دامیننس تتر (بدون API خارجی)
+# 🟢 تحلیل هوشمند دامیننس تتر در هر تایم‌فریم
 # ==========================================
-def find_pivots(df, length=5):
-    highs = df["high"].values; lows = df["low"].values
-    n = len(df); ph, pl = [], []
-    for i in range(length, n - length):
-        if highs[i] == np.max(highs[i-length:i+length+1]):
-            ph.append({"index": i, "price": highs[i]})
-        if lows[i] == np.min(lows[i-length:i+length+1]):
-            pl.append({"index": i, "price": lows[i]})
-    return ph, pl
-
 def get_usdt_dominance_trend():
     tfs = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h"}
     results = {}
     current_dom = None
     
-    # گرفتن دامیننس فعلی برای نمایش
+    # گرفتن دامیننس فعلی
     try:
         r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
         data = r.json()["data"]
@@ -203,9 +77,9 @@ def get_usdt_dominance_trend():
 
     for tf, interval in tfs.items():
         try:
-            # 🟢 استفاده از BUSD به عنوان نماینده استیبل‌کوین‌ها برای محاسبه روند
+            # دریافت دیتا در همان تایم‌فریم
             days = 2 if tf in ["5m", "15m"] else 7 if tf == "1h" else 30
-            df = yf.download("BUSD-USD", period=f"{days}d", interval=interval, progress=False)
+            df = yf.download("USDT-USD", period=f"{days}d", interval=interval, progress=False)
             
             if df.empty or len(df) < 20:
                 results[tf] = {"trend": "داده کافی نیست", "bias": "neutral", "emoji": "➡️"}
@@ -214,64 +88,99 @@ def get_usdt_dominance_trend():
             df = df[["Open","High","Low","Close"]].dropna()
             df.columns = ["open","high","low","close"]
             
-            current_price = df["close"].iloc[-1]
-            ph, pl = find_pivots(df, length=5)
+            # 🟢 ۱. محاسبه RSI (۱۴ دوره)
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['rsi'] = 100 - (100 / (1 + rs))
             
-            resistances = [p["price"] for p in ph if p["price"] > current_price]
-            supports = [p["price"] for p in pl if p["price"] < current_price]
-            nearest_res = min(resistances) if resistances else None
-            nearest_sup = max(supports) if supports else None
+            # 🟢 ۲. محاسبه EMA ۲۰ و ۵۰
+            df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+            df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
             
-            last_high = df["high"].iloc[-1]
-            last_low = df["low"].iloc[-1]
-            last_close = df["close"].iloc[-1]
+            # 🟢 ۳. محاسبه Bollinger Bands (۲۰ دوره)
+            df['bb_mid'] = df['close'].rolling(20).mean()
+            df['bb_std'] = df['close'].rolling(20).std()
+            df['bb_upper'] = df['bb_mid'] + (df['bb_std'] * 2)
+            df['bb_lower'] = df['bb_mid'] - (df['bb_std'] * 2)
             
-            active_bsl = [p["price"] for p in ph if p["index"] < len(df)-2][-5:]
-            active_ssl = [p["price"] for p in pl if p["index"] < len(df)-2][-5:]
+            # آخرین مقادیر
+            last = df.iloc[-1]
+            rsi = last['rsi']
+            ema20 = last['ema20']
+            ema50 = last['ema50']
+            close = last['close']
+            bb_upper = last['bb_upper']
+            bb_lower = last['bb_lower']
             
-            swept_high = any(last_high > bsl and last_close < bsl for bsl in active_bsl)
-            swept_low = any(last_low < ssl and last_close > ssl for ssl in active_ssl)
-            
+            # 🟢 منطق تصمیم‌گیری
             analysis = ""
             bias = "neutral"
             emoji = "➡️"
             
-            if swept_high:
-                analysis = "شکار سقف → صعود کریپتو"
+            # تعیین وضعیت بر اساس RSI
+            if rsi > 70:
+                rsi_state = "نزدیک مقاومت (اشباع خرید)"
+            elif rsi < 30:
+                rsi_state = "نزدیک حمایت (اشباع فروش)"
+            elif rsi > 50:
+                rsi_state = "بالای وسط (نزولی خفیف)"
+            else:
+                rsi_state = "زیر وسط (صعودی خفیف)"
+                
+            # تعیین وضعیت بر اساس EMA
+            if ema20 > ema50:
+                ema_state = "روند صعودی"
+            else:
+                ema_state = "روند نزولی"
+                
+            # تعیین وضعیت بر اساس Bollinger
+            if close > bb_upper:
+                bb_state = "بالاتر از باند بالا (مقاومت قوی)"
+            elif close < bb_lower:
+                bb_state = "پایین‌تر از باند پایین (حمایت قوی)"
+            else:
+                bb_state = "داخل باندها (نوسان عادی)"
+                
+            # ترکیب نهایی
+            if rsi < 30 and ema20 > ema50:
+                analysis = f"🟢 صعودی قوی | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
                 bias = "bullish"
                 emoji = "📉"
-            elif swept_low:
-                analysis = "شکار کف → ریزش کریپتو"
+            elif rsi < 50 and ema20 > ema50:
+                analysis = f"🟡 صعودی خفیف | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
+                bias = "bullish"
+                emoji = "📉"
+            elif rsi > 70 and ema20 < ema50:
+                analysis = f"🔴 نزولی قوی | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
+                bias = "bearish"
+                emoji = "📈"
+            elif rsi > 50 and ema20 < ema50:
+                analysis = f"🟠 نزولی خفیف | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
                 bias = "bearish"
                 emoji = "📈"
             else:
-                if nearest_res and nearest_sup:
-                    dist_res = (nearest_res - current_price) / current_price * 100
-                    dist_sup = (current_price - nearest_sup) / current_price * 100
-                    
-                    if dist_res < dist_sup * 0.5:
-                        analysis = f"نزدیک مقاومت {nearest_res:.2f}٪ → احتمال برگشت"
-                        bias = "bullish"
-                        emoji = "📉"
-                    elif dist_sup < dist_res * 0.5:
-                        analysis = f"نزدیک حمایت {nearest_sup:.2f}٪ → احتمال برگشت"
-                        bias = "bearish"
-                        emoji = "📈"
-                    else:
-                        analysis = "بین حمایت و مقاومت (وسط)"
-                        bias = "neutral"
-                        emoji = "➡️"
-                else:
-                    analysis = "محدوده نامشخص"
-                    bias = "neutral"
-                    emoji = "➡️"
-                    
+                analysis = f"⚪ خنثی | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
+                bias = "neutral"
+                emoji = "➡️"
+                
             results[tf] = {"trend": analysis, "bias": bias, "emoji": emoji}
         except Exception as e:
             print(f"USDT.D {tf} err: {e}")
             results[tf] = {"trend": "خطا در تحلیل", "bias": "neutral", "emoji": "➡️"}
             
     return results, current_dom
+
+def find_pivots(df, length=PIVOT_LENGTH):
+    highs = df["high"].values; lows = df["low"].values
+    n = len(df); ph, pl = [], []
+    for i in range(length, n - length):
+        if highs[i] == np.max(highs[i-length:i+length+1]):
+            ph.append({"index": i, "price": highs[i]})
+        if lows[i] == np.min(lows[i-length:i+length+1]):
+            pl.append({"index": i, "price": lows[i]})
+    return ph, pl
 
 def analyze_market_structure(df, ph, pl, current_price):
     resistances = [p["price"] for p in ph if p["price"] > current_price]
@@ -351,7 +260,9 @@ def scan_ict(usdt_tfs):
                     signals = [max(signals, key=lambda x: x["score"])]
 
                 for sig in signals:
-                    # 🟢 استفاده از تایم‌فریم هم‌راستا برای تتر
+                    if sig["score"] < 2:
+                        continue
+                        
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "➡️"
                     if bias == "bullish": rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
@@ -367,48 +278,14 @@ def scan_ict(usdt_tfs):
                 print(f"ICT {symbol} {tf} err: {str(e)[:80]}")
     return pd.DataFrame(results) if results else pd.DataFrame()
 
-def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
+def build_message(usdt_tfs, current_dom, ict_df, follow_ups):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    msg = f"<b>📊 اسکنر ترکیبی</b> — {now}\n\n"
+    msg = f"<b>📊 اسکنر ICT</b> — {now}\n\n"
     
     msg += f"<b>📉 تحلیل دامیننس تتر ({current_dom}%):</b>\n"
     for tf, data in usdt_tfs.items():
-        msg += f"• {tf}: {data['emoji']} {data['trend']}\n"
+        msg += f"• {tf}: {data['trend']}\n"
     msg += "\n"
-
-    if not zdf.empty:
-        msg += "📈 <b>ZLSMA Trend (4 TFs + Ind.)</b>\n"
-        msg += "<pre>\n"
-        msg += f"{'Sym':<7}|{'5m':<2}|{'15m':<2}|{'1h':<2}|{'4h':<2}|{'CE':<6}|{'Vol':<5}|{'FVG':<5}|Scr\n"
-        msg += "-" * 55 + "\n"
-        
-        def get_icon(val):
-            if val == "UP": return "🟢"
-            if val == "DOWN": return "🔴"
-            return "⚪"
-
-        for _, r in zdf.iterrows():
-            sym_short = r['Symbol'][:7]
-            t5 = get_icon(r.get('5m'))
-            t15 = get_icon(r.get('15m'))
-            t1h = get_icon(r.get('1h'))
-            t4h = get_icon(r.get('4h'))
-            
-            ce_1h = r.get('CE_1h', '⚪')
-            ce_4h = r.get('CE_4h', '⚪')
-            vol_1h = r.get('Vol_1h', '⚪')
-            vol_4h = r.get('Vol_4h', '⚪')
-            fvg_1h = r.get('FVG_1h', '⚪')
-            fvg_4h = r.get('FVG_4h', '⚪')
-            
-            ce_str = f"{ce_1h}{ce_4h}"
-            vol_str = f"{vol_1h}{vol_4h}"
-            fvg_str = f"{fvg_1h}{fvg_4h}"
-            
-            score = int(r['Score'])
-            msg += f"{sym_short:<7}|{t5} |{t15} |{t1h} |{t4h} |{ce_str:<6}|{vol_str:<5}|{fvg_str:<5}|{score}/4\n"
-            
-        msg += "</pre>\n\n"
 
     if follow_ups:
         msg += "🔎 <b>نتیجه سیگنال‌های قبلی:</b>\n"
@@ -439,7 +316,7 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
                     f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n")
         msg += "\n"
 
-    if zdf.empty and ict_df.empty and not follow_ups:
+    if ict_df.empty and not follow_ups:
         return None
 
     msg += "⚠️ این پیام صرفاً تحلیلی است، نه سیگنال خرید/فروش."
@@ -450,11 +327,7 @@ def main():
 
     usdt_tfs, current_dom = get_usdt_dominance_trend()
 
-    print("=" * 70); print("ZLSMA Ultimate Scanner (via Kraken)"); print("=" * 70)
-    zdf = scan_zlsma()
-    print(zdf.to_string(index=False))
-
-    print("\n" + "=" * 70); print("ICT Liquidity Sweep"); print("=" * 70)
+    print("=" * 70); print("ICT Liquidity Sweep Scanner"); print("=" * 70)
     ict_df = scan_ict(usdt_tfs)
     if not ict_df.empty: print(ict_df.to_string(index=False))
 
@@ -515,7 +388,7 @@ def main():
     ict_new_df = pd.DataFrame(new_ict) if new_ict else pd.DataFrame()
     save_state(state)
 
-    msg = build_message(zdf, usdt_tfs, current_dom, ict_new_df, follow_ups)
+    msg = build_message(usdt_tfs, current_dom, ict_new_df, follow_ups)
     if msg:
         print("\nTelegram sent:", send_telegram(msg))
     else:
