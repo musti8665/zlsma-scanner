@@ -13,7 +13,6 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
-# 🟢 ZLSMA Symbols (Kraken format)
 ZLSMA_SYMBOLS = [
     "SHIBUSD","PEOPLEUSD","ZECUSD","ARKMUSD","TIAUSD",
     "ICPUSD","RUNEUSD","BOMEUSD","SEIUSD",
@@ -22,13 +21,11 @@ ZLSMA_SYMBOLS = [
     "HBARUSD", "ALGOUSD", "INJUSD", "FETUSD", "ONDOUSD"
 ]
 
-# 🟢 نگاشت تایم‌فریم‌ها به فرمت Kraken (دقیقه)
 ZLSMA_TF = {"5m":"5", "15m":"15", "1h":"60", "4h":"240"}
 ZLSMA_LEN = 32
 ZLSMA_OFF = 0
 KRAKEN_BASE = "https://api.kraken.com/0/public/OHLC"
 
-# 🟢 ICT Symbols (yfinance format)
 ICT_SYMBOLS = [
     "SHIB-USD","ICP-USD","SEI-USD","NOT-USD","WIF-USD","AVAX-USD",
     "WLD-USD","PEPE-USD","ADA-USD","NEAR-USD","OP-USD","BONK-USD",
@@ -70,35 +67,25 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-# ==========================================
-# 🟢 دریافت دیتا از Kraken (برای ZLSMA)
-# ==========================================
 def fetch_kraken_klines(symbol, interval, limit=200):
     try:
         params = {"pair": symbol, "interval": interval}
         r = requests.get(KRAKEN_BASE, params=params, timeout=15)
         r.raise_for_status()
         data = r.json()
-        
         if data.get("error"):
             print(f"Kraken Error {symbol} {interval}: {data['error']}")
             return None
-            
         result = data.get("result", {})
         pair_keys = [k for k in result.keys() if k != "last"]
-        if not pair_keys:
-            return None
-            
+        if not pair_keys: return None
         klines = result[pair_keys[0]]
-        if not klines:
-            return None
-            
+        if not klines: return None
         df = pd.DataFrame(klines, columns=[
             "time","open","high","low","close","vwap","volume","count"
         ])
         for col in ["open","high","low","close","volume"]:
             df[col] = df[col].astype(float)
-        
         if len(df) > 1:
             df = df.iloc[:-1]
         return df
@@ -186,48 +173,50 @@ def scan_zlsma():
     df = df.sort_values("Score", ascending=False).reset_index(drop=True)
     return df
 
+# ==========================================
+# 🟢 محاسبه دقیق دامیننس تتر در هر تایم‌فریم
+# ==========================================
 def get_usdt_dominance_trend():
-    tfs = {"15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"}
+    tfs = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"}
     results = {}
+    
+    for tf, interval in tfs.items():
+        try:
+            days = 2 if tf in ["5m", "15m"] else 7 if tf == "1h" else 30
+            df = yf.download("USDT-USD", period=f"{days}d", interval=interval, progress=False)
+            
+            if df.empty or len(df) < 5:
+                results[tf] = {"trend": "➡️ (خنثی)", "bias": "neutral", "emoji": "➡️"}
+                continue
+
+            z = zlsma(df["Close"], length=14)
+            last_z = z.iloc[-1]
+            prev_z = z.iloc[-2]
+            
+            if last_z > prev_z:
+                trend = "📈 (صعودی - ریسک‌گریز)"
+                bias = "bearish"
+                emoji = "📈"
+            else:
+                trend = "📉 (نزولی - ریسک‌پذیر)"
+                bias = "bullish"
+                emoji = "📉"
+                
+            results[tf] = {"trend": trend, "bias": bias, "emoji": emoji}
+        except Exception as e:
+            print(f"USDT.D {tf} err: {e}")
+            results[tf] = {"trend": "➡️ (خنثی)", "bias": "neutral", "emoji": "➡️"}
+            
     try:
         r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
         data = r.json()["data"]
         r2 = requests.get("https://api.coingecko.com/api/v3/coins/tether", timeout=10)
         usdt_data = r2.json()
         current_dom = (usdt_data["market_data"]["market_cap"]["usd"] / data["total_market_cap"]["usd"]) * 100
-        usdt_chg_24h = usdt_data["market_data"]["market_cap_change_percentage_24h"]
-        market_chg_24h = data["market_cap_change_percentage_24h_usd"]
-        
-        if usdt_chg_24h > market_chg_24h + 0.1:
-            bias = "bearish"; trend = "📈 (صعودی - ریسک‌گریز)"
-        elif usdt_chg_24h < market_chg_24h - 0.1:
-            bias = "bullish"; trend = "📉 (نزولی - ریسک‌پذیر)"
-        else:
-            bias = "neutral"; trend = "➡️ (خنثی)"
-            
-        for tf in tfs:
-            results[tf] = {"trend": trend, "bias": bias, "emoji": trend}
-        return results, round(current_dom, 2)
-    except Exception as e:
-        for tf in tfs:
-            results[tf] = {"trend": "❓", "bias": "neutral", "emoji": "❓"}
-        return results, None
-
-# ==========================================
-# 🟡 ICT (yfinance) + Market Structure
-# ==========================================
-def yf_data(symbol, interval, days=ICT_LOOKBACK_DAYS):
-    end = datetime.now(); start = end - timedelta(days=days)
-    try:
-        df = yf.download(symbol, start=start, end=end, interval=interval, progress=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        if df.empty or len(df) < 60: return None
-        df = df[["Open","High","Low","Close","Volume"]].dropna()
-        df.columns = ["open","high","low","close","volume"]
-        return df.iloc[:-1]
     except:
-        return None
+        current_dom = None
+        
+    return results, round(current_dom, 2) if current_dom else None
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -296,17 +285,37 @@ def scan_ict(usdt_tfs):
         for tf in ICT_TF_LIST:
             try:
                 days = 30 if tf == "4h" else 7
-                df = yf_data(symbol, tf, days)
-                if df is None: continue
+                df = yf.download(symbol, period=f"{days}d", interval=tf, progress=False)
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                if df.empty or len(df) < 60: continue
+                df = df[["Open","High","Low","Close","Volume"]].dropna()
+                df.columns = ["open","high","low","close","volume"]
+                df = df.iloc[:-1]
+                
                 ph, pl = find_pivots(df)
                 signals = detect_sweeps(df, ph, pl)
+                
+                if not signals: continue
+
                 clean = symbol.replace("-USD", "/USDT").replace("32196", "")
                 current_price = df["close"].iloc[-1]
                 market_structure = analyze_market_structure(df, ph, pl, current_price)
-
+                
+                valid_signals = []
                 for sig in signals:
+                    if sig["type"] == "LONG" and "نزدیک مقاومت" in market_structure: continue
+                    if sig["type"] == "SHORT" and "نزدیک حمایت" in market_structure: continue
+                    valid_signals.append(sig)
+                
+                if len(valid_signals) > 1:
+                    valid_signals = [max(valid_signals, key=lambda x: x["score"])]
+                
+                if not valid_signals: continue
+
+                for sig in valid_signals:
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
-                    trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "❓"
+                    trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "➡️"
                     if bias == "bullish": rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
                     elif bias == "bearish": rel = "موافق روند" if sig["type"]=="SHORT" else "خلاف روند"
                     else: rel = "خنثی"
@@ -381,7 +390,6 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
         for _, r in ict_df.iterrows():
             emo = "🟢" if r["Signal"] == "LONG" else "🔴"
             
-            # 🟢 هشدار ریسک
             risk_warning = ""
             if "وسط" in r['Market Structure']:
                 risk_warning += " ⚠️(وسط)"
@@ -442,7 +450,8 @@ def main():
         del state[k]
 
     new_ict = []
-    HALF_HOUR = 30 * 60
+    # 🟢 تغییر زمان ضد اسپم به ۱۵ دقیقه
+    FIFTEEN_MIN = 15 * 60
 
     for _, r in ict_df.iterrows() if not ict_df.empty else []:
         sym = r['Symbol']; tf = r['TF']; sig_type = r['Signal'] 
@@ -452,7 +461,7 @@ def main():
         if key in state and isinstance(state[key], dict):
             last_type = state[key].get("Signal")
             last_ts = state[key].get("timestamp", 0)
-            if sig_type != last_type or (now_ts - last_ts) >= HALF_HOUR:
+            if sig_type != last_type or (now_ts - last_ts) >= FIFTEEN_MIN:
                 is_new = True
         else:
             is_new = True
