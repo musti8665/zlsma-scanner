@@ -1,5 +1,5 @@
 # ============================================================
-# Combined Scanner: ZLSMA + ICT (All via yfinance - Ultra Stable)
+# Combined Scanner: ZLSMA (via Bybit) + ICT (via yfinance)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -13,20 +13,21 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
-# 🟢 ارزهای جدید به ZLSMA اضافه شدند
+# 🟢 ZLSMA Symbols (Bybit format)
 ZLSMA_SYMBOLS = [
-    "SHIB-USD","PEOPLE-USD","ZEC-USD","ARKM-USD","MYX-USD","TIA-USD",
-    "ICP-USD","RUNE-USD","DOGS-USD","BOME-USD","SEI-USD",
-    "NOT-USD","APT-USD","WIF-USD","AVAX-USD","WLD-USD","MEME-USD","PEPE-USD",
-    "AR-USD","ADA-USD","NEAR-USD","OP-USD","SUI-USD","BONK-USD","CKB-USD",
-    "HYPE32196-USD", "HBAR-USD", "ALGO-USD", "INJ-USD", "FET-USD", "UNI-USD", "ONDO-USD"
+    "SHIBUSDT","PEOPLEUSDT","ZECUSDT","ARKMUSDT","MYXUSDT","TIAUSDT",
+    "ICPUSDT","RUNEUSDT","DOGSUSDT","BOMEUSDT","SEIUSDT",
+    "NOTUSDT","APTUSDT","WIFUSDT","AVAXUSDT","WLDUSDT","MEMEUSDT","PEPEUSDT",
+    "ARUSDT","ADAUSDT","NEARUSDT","OPUSDT","SUIUSDT","BONKUSDT","CKBUSDT",
+    "HYPEUSDT", "HBARUSDT", "ALGOUSDT", "INJUSDT", "FETUSDT", "UNIUSDT", "ONDOUSDT"
 ]
 
-ZLSMA_TF = {"3m":"3m", "5m":"5m", "15m":"15m", "1h":"1h", "4h":"4h"}
+ZLSMA_TF = {"3m":"3", "5m":"5", "15m":"15", "1h":"60", "4h":"240"}
 ZLSMA_LEN = 32
 ZLSMA_OFF = 0
+BYBIT_BASE = "https://api.bybit.com"
 
-# 🟢 ارزهای جدید به ICT اضافه شدند
+# 🟢 ICT Symbols (yfinance format)
 ICT_SYMBOLS = [
     "SHIB-USD","ICP-USD","SEI-USD","NOT-USD","WIF-USD","AVAX-USD",
     "WLD-USD","PEPE-USD","ADA-USD","NEAR-USD","OP-USD","BONK-USD",
@@ -64,19 +65,45 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-def yf_data(symbol, interval, days):
-    end = datetime.now(); start = end - timedelta(days=days)
+# ==========================================
+# 🟢 دریافت دیتا از Bybit (جایگزین yfinance برای ZLSMA)
+# ==========================================
+def fetch_bybit_klines(symbol, interval, limit=200):
     try:
-        df = yf.download(symbol, start=start, end=end, interval=interval, progress=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        if df.empty or len(df) < 60: 
+        url = f"{BYBIT_BASE}/v5/market/kline"
+        params = {
+            "category": "spot",
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit
+        }
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        
+        if data.get("retCode") != 0:
+            print(f"Bybit Error {symbol} {interval}: {data.get('retMsg')}")
             return None
-        df = df[["Open","High","Low","Close"]].dropna()
-        df.columns = ["open","high","low","close"]
-        # 🔴 حذف کندل آخر (ناقص)
-        return df.iloc[:-1] 
+            
+        klines = data["result"]["list"]
+        if not klines:
+            return None
+            
+        # Bybit returns newest first, so we reverse it to oldest first
+        klines.reverse()
+        
+        # Columns: startTime, open, high, low, close, volume, turnover
+        df = pd.DataFrame(klines, columns=[
+            "open_time","open","high","low","close","volume","turnover"
+        ])
+        df["close"] = df["close"].astype(float)
+        
+        # 🔴 حذف آخرین کندل (کندل در حال تشکیل)
+        if len(df) > 1:
+            df = df.iloc[:-1]
+        return df
     except Exception as e:
+        print(f"Bybit fetch error {symbol} {interval}: {e}")
         return None
 
 def linreg(series, length, offset=0):
@@ -109,10 +136,9 @@ def scan_zlsma():
     rows = []
     tf_keys = list(ZLSMA_TF.keys())
     for sym in ZLSMA_SYMBOLS:
-        row = {"Symbol": sym.replace("-USD", "").replace("32196", "")[:9]}
-        for tf_name, tf in ZLSMA_TF.items():
-            days = 30 if tf == "4h" else 7
-            df = yf_data(sym, tf, days)
+        row = {"Symbol": sym.replace("USDT", "")[:9]}
+        for tf_name, tf_code in ZLSMA_TF.items():
+            df = fetch_bybit_klines(sym, tf_code, limit=200)
             
             if df is not None and len(df) >= ZLSMA_LEN:
                 z = zlsma(df["close"])
@@ -153,6 +179,22 @@ def get_usdt_dominance_trend():
         for tf in tfs:
             results[tf] = {"trend": "❓", "bias": "neutral", "emoji": "❓"}
         return results, None
+
+# ==========================================
+# 🟡 ICT (بدون تغییر، از yfinance)
+# ==========================================
+def yf_data(symbol, interval, days=ICT_LOOKBACK_DAYS):
+    end = datetime.now(); start = end - timedelta(days=days)
+    try:
+        df = yf.download(symbol, start=start, end=end, interval=interval, progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        if df.empty or len(df) < 60: return None
+        df = df[["Open","High","Low","Close"]].dropna()
+        df.columns = ["open","high","low","close"]
+        return df.iloc[:-1]
+    except:
+        return None
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -268,7 +310,6 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df):
         msg += f"💧 <b>ICT Liquidity Sweep</b> ({len(ict_df)} سیگنال)\n\n"
         for _, r in ict_df.iterrows():
             emo = "🟢" if r["Signal"] == "LONG" else "🔴"
-            # 🟢 اضافه شدن دامیننس تتر به هر سیگنال ICT
             msg += (f"{emo} <code>{r['Symbol']}</code> | TF: {r['TF']} | {r['Signal']} "
                     f"| ⭐{r['Score']} | مرحله: {r['Stage']} | USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n")
         msg += "\n"
@@ -284,7 +325,7 @@ def main():
 
     usdt_tfs, current_dom = get_usdt_dominance_trend()
 
-    print("=" * 70); print("ZLSMA Scanner (via yfinance)"); print("=" * 70)
+    print("=" * 70); print("ZLSMA Scanner (via Bybit)"); print("=" * 70)
     zdf = scan_zlsma()
     print(zdf.to_string(index=False))
 
@@ -296,7 +337,7 @@ def main():
     new_ict = []
     now_ts = time.time()
     
-    HALF_HOUR = 30 * 60  # ضد اسپم ۳۰ دقیقه
+    HALF_HOUR = 30 * 60
 
     for _, r in ict_df.iterrows() if not ict_df.empty else []:
         sym = r['Symbol']
