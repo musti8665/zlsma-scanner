@@ -1,5 +1,6 @@
 # ============================================================
 # Ultimate Scanner: ZLSMA (via Kraken) + ICT (via yfinance)
+# + Multi-Timeframe USDT.D Analysis
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -173,49 +174,10 @@ def scan_zlsma():
     df = df.sort_values("Score", ascending=False).reset_index(drop=True)
     return df
 
-def get_usdt_dominance_trend():
-    tfs = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"}
-    results = {}
-    
-    for tf, interval in tfs.items():
-        try:
-            days = 2 if tf in ["5m", "15m"] else 7 if tf == "1h" else 30
-            df = yf.download("USDT-USD", period=f"{days}d", interval=interval, progress=False)
-            
-            if df.empty or len(df) < 5:
-                results[tf] = {"trend": "➡️ (خنثی)", "bias": "neutral", "emoji": "➡️"}
-                continue
-
-            z = zlsma(df["Close"], length=14)
-            last_z = z.iloc[-1]
-            prev_z = z.iloc[-2]
-            
-            if last_z > prev_z:
-                trend = "📈 (صعودی - ریسک‌گریز)"
-                bias = "bearish"
-                emoji = "📈"
-            else:
-                trend = "📉 (نزولی - ریسک‌پذیر)"
-                bias = "bullish"
-                emoji = "📉"
-                
-            results[tf] = {"trend": trend, "bias": bias, "emoji": emoji}
-        except Exception as e:
-            print(f"USDT.D {tf} err: {e}")
-            results[tf] = {"trend": "➡️ (خنثی)", "bias": "neutral", "emoji": "➡️"}
-            
-    try:
-        r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
-        data = r.json()["data"]
-        r2 = requests.get("https://api.coingecko.com/api/v3/coins/tether", timeout=10)
-        usdt_data = r2.json()
-        current_dom = (usdt_data["market_data"]["market_cap"]["usd"] / data["total_market_cap"]["usd"]) * 100
-    except:
-        current_dom = None
-        
-    return results, round(current_dom, 2) if current_dom else None
-
-def find_pivots(df, length=PIVOT_LENGTH):
+# ==========================================
+# 🟢 تحلیل دقیق تتر در هر تایم‌فریم (هم‌راستایی)
+# ==========================================
+def find_pivots(df, length=5):
     highs = df["high"].values; lows = df["low"].values
     n = len(df); ph, pl = [], []
     for i in range(length, n - length):
@@ -224,6 +186,93 @@ def find_pivots(df, length=PIVOT_LENGTH):
         if lows[i] == np.min(lows[i-length:i+length+1]):
             pl.append({"index": i, "price": lows[i]})
     return ph, pl
+
+def get_usdt_dominance_trend():
+    tfs = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h"}
+    results = {}
+    current_dom = None
+    
+    # گرفتن دامیننس فعلی برای نمایش
+    try:
+        r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
+        data = r.json()["data"]
+        r2 = requests.get("https://api.coingecko.com/api/v3/coins/tether", timeout=10)
+        usdt_data = r2.json()
+        current_dom = round((usdt_data["market_data"]["market_cap"]["usd"] / data["total_market_cap"]["usd"]) * 100, 2)
+    except:
+        pass
+
+    for tf, interval in tfs.items():
+        try:
+            # برای هر تایم‌فریم، دیتای مربوط به همان تایم‌فریم را می‌گیریم
+            days = 2 if tf in ["5m", "15m"] else 7 if tf == "1h" else 30
+            df = yf.download("USDT-USD", period=f"{days}d", interval=interval, progress=False)
+            
+            if df.empty or len(df) < 20:
+                results[tf] = {"trend": "داده کافی نیست", "bias": "neutral", "emoji": "➡️"}
+                continue
+
+            df = df[["Open","High","Low","Close"]].dropna()
+            df.columns = ["open","high","low","close"]
+            
+            current_price = df["close"].iloc[-1]
+            ph, pl = find_pivots(df, length=5)
+            
+            resistances = [p["price"] for p in ph if p["price"] > current_price]
+            supports = [p["price"] for p in pl if p["price"] < current_price]
+            nearest_res = min(resistances) if resistances else None
+            nearest_sup = max(supports) if supports else None
+            
+            last_high = df["high"].iloc[-1]
+            last_low = df["low"].iloc[-1]
+            last_close = df["close"].iloc[-1]
+            
+            active_bsl = [p["price"] for p in ph if p["index"] < len(df)-2][-5:]
+            active_ssl = [p["price"] for p in pl if p["index"] < len(df)-2][-5:]
+            
+            swept_high = any(last_high > bsl and last_close < bsl for bsl in active_bsl)
+            swept_low = any(last_low < ssl and last_close > ssl for ssl in active_ssl)
+            
+            analysis = ""
+            bias = "neutral"
+            emoji = "➡️"
+            
+            if swept_high:
+                analysis = "شکار سقف → صعود کریپتو"
+                bias = "bullish"
+                emoji = "📉"
+            elif swept_low:
+                analysis = "شکار کف → ریزش کریپتو"
+                bias = "bearish"
+                emoji = "📈"
+            else:
+                if nearest_res and nearest_sup:
+                    dist_res = (nearest_res - current_price) / current_price * 100
+                    dist_sup = (current_price - nearest_sup) / current_price * 100
+                    
+                    if dist_res < dist_sup * 0.5:
+                        analysis = f"نزدیک مقاومت {nearest_res:.2f}٪ → احتمال برگشت"
+                        bias = "bullish"
+                        emoji = "📉"
+                    elif dist_sup < dist_res * 0.5:
+                        analysis = f"نزدیک حمایت {nearest_sup:.2f}٪ → احتمال برگشت"
+                        bias = "bearish"
+                        emoji = "📈"
+                    else:
+                        analysis = "بین حمایت و مقاومت (وسط)"
+                        bias = "neutral"
+                        emoji = "➡️"
+                else:
+                    analysis = "محدوده نامشخص"
+                    bias = "neutral"
+                    emoji = "➡️"
+                    
+            results[tf] = {"trend": analysis, "bias": bias, "emoji": emoji}
+        except Exception as e:
+            print(f"USDT.D {tf} err: {e}")
+            results[tf] = {"trend": "خطا در تحلیل", "bias": "neutral", "emoji": "➡️"}
+            
+    return results, current_dom
 
 def analyze_market_structure(df, ph, pl, current_price):
     resistances = [p["price"] for p in ph if p["price"] > current_price]
@@ -299,17 +348,11 @@ def scan_ict(usdt_tfs):
                 current_price = df["close"].iloc[-1]
                 market_structure = analyze_market_structure(df, ph, pl, current_price)
                 
-                valid_signals = []
-                for sig in signals:
-                    # به جای حذف کامل، فقط علامت هشدار میدهیم
-                    valid_signals.append(sig)
-                
-                if len(valid_signals) > 1:
-                    valid_signals = [max(valid_signals, key=lambda x: x["score"])]
-                
-                if not valid_signals: continue
+                if len(signals) > 1:
+                    signals = [max(signals, key=lambda x: x["score"])]
 
-                for sig in valid_signals:
+                for sig in signals:
+                    # 🟢 استفاده از تایم‌فریم هم‌راستا برای تتر
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "➡️"
                     if bias == "bullish": rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
@@ -329,9 +372,9 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     msg = f"<b>📊 اسکنر ترکیبی</b> — {now}\n\n"
     
-    msg += f"<b>USDT.D ({current_dom}%):</b>\n"
+    msg += f"<b>📉 تحلیل دامیننس تتر ({current_dom}%):</b>\n"
     for tf, data in usdt_tfs.items():
-        msg += f"• {tf}: {data['trend']}\n"
+        msg += f"• {tf}: {data['emoji']} {data['trend']}\n"
     msg += "\n"
 
     if not zdf.empty:
@@ -367,7 +410,6 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
             msg += f"{sym_short:<7}|{t5} |{t15} |{t1h} |{t4h} |{ce_str:<6}|{vol_str:<5}|{fvg_str:<5}|{score}/4\n"
             
         msg += "</pre>\n\n"
-        msg += "راهنما: CE=Chandelier | Vol=حجم | FVG=شکاف ارزش (ستون‌ها: اول 1h، دوم 4h)\n\n"
 
     if follow_ups:
         msg += "🔎 <b>نتیجه سیگنال‌های قبلی:</b>\n"
@@ -449,7 +491,6 @@ def main():
         del state[k]
 
     new_ict = []
-    # 🟢 تغییر زمان ضد اسپم به ۱۵ دقیقه
     FIFTEEN_MIN = 15 * 60
 
     for _, r in ict_df.iterrows() if not ict_df.empty else []:
@@ -460,7 +501,6 @@ def main():
         if key in state and isinstance(state[key], dict):
             last_type = state[key].get("Signal")
             last_ts = state[key].get("timestamp", 0)
-            # فقط اگر جهت عوض شد یا ۱۵ دقیقه گذشت
             if sig_type != last_type or (now_ts - last_ts) >= FIFTEEN_MIN:
                 is_new = True
         else:
