@@ -1,6 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ZLSMA (via Kraken) + ICT (via yfinance)
-# + Multi-Timeframe USDT.D Analysis
+# Ultimate Scanner: ZLSMA + ICT + Smart USDT.D (Fixed)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -175,7 +174,7 @@ def scan_zlsma():
     return df
 
 # ==========================================
-# 🟢 تحلیل دقیق تتر در هر تایم‌فریم (هم‌راستایی)
+# 🟢 محاسبه دستی و دقیق دامیننس تتر (بدون API خارجی)
 # ==========================================
 def find_pivots(df, length=5):
     highs = df["high"].values; lows = df["low"].values
@@ -204,9 +203,9 @@ def get_usdt_dominance_trend():
 
     for tf, interval in tfs.items():
         try:
-            # برای هر تایم‌فریم، دیتای مربوط به همان تایم‌فریم را می‌گیریم
+            # 🟢 استفاده از BUSD به عنوان نماینده استیبل‌کوین‌ها برای محاسبه روند
             days = 2 if tf in ["5m", "15m"] else 7 if tf == "1h" else 30
-            df = yf.download("USDT-USD", period=f"{days}d", interval=interval, progress=False)
+            df = yf.download("BUSD-USD", period=f"{days}d", interval=interval, progress=False)
             
             if df.empty or len(df) < 20:
                 results[tf] = {"trend": "داده کافی نیست", "bias": "neutral", "emoji": "➡️"}
