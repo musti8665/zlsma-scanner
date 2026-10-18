@@ -13,7 +13,6 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
-# 🟢 ZLSMA Symbols (yfinance format)
 ZLSMA_SYMBOLS = [
     "SHIB-USD","PEOPLE-USD","ZEC-USD","ARKM-USD","MYX-USD","TIA-USD",
     "ICP-USD","RUNE-USD","DOGS-USD","BOME-USD","SEI-USD",
@@ -22,12 +21,10 @@ ZLSMA_SYMBOLS = [
     "HYPE32196-USD", "HBAR-USD", "ALGO-USD", "INJ-USD", "FET-USD", "UNI-USD", "ONDO-USD"
 ]
 
-# 🟢 برگشت به ۵ تایم فریم
 ZLSMA_TF = {"3m":"3m", "5m":"5m", "15m":"15m", "1h":"1h", "4h":"4h"}
 ZLSMA_LEN = 32
 ZLSMA_OFF = 0
 
-# 🟢 ICT Symbols (yfinance format)
 ICT_SYMBOLS = [
     "SHIB-USD","ICP-USD","SEI-USD","NOT-USD","WIF-USD","AVAX-USD",
     "WLD-USD","PEPE-USD","ADA-USD","NEAR-USD","OP-USD","BONK-USD",
@@ -143,17 +140,18 @@ def scan_zlsma():
                 z = zlsma(df["close"])
                 row[tf_name] = "UP" if z.iloc[-1] > z.iloc[-2] else "DOWN"
                 
-                # محاسبه اندیکاتورهای کمکی فقط برای تایم فریم 4h
-                if tf_name == "4h":
-                    row["CE"] = "🟢" if chandelier_exit(df) == 1 else "🔴"
-                    row["Vol"] = "📊" if check_volume(df) else "➖"
-                    row["FVG"] = "⚡" if check_fvg(df) else "➖"
+                # 🟢 محاسبه اندیکاتورهای کمکی برای 1h و 4h
+                if tf_name in ["1h", "4h"]:
+                    ce = "🟢" if chandelier_exit(df) == 1 else "🔴"
+                    vol = "📊" if check_volume(df) else "➖"
+                    fvg = "⚡" if check_fvg(df) else "➖"
+                    row[f"CE_{tf_name}"] = ce
+                    row[f"VF_{tf_name}"] = f"{vol}{fvg}"
             else:
                 row[tf_name] = "ERR"
-                if tf_name == "4h":
-                    row["CE"] = "⚪"
-                    row["Vol"] = "⚪"
-                    row["FVG"] = "⚪"
+                if tf_name in ["1h", "4h"]:
+                    row[f"CE_{tf_name}"] = "⚪"
+                    row[f"VF_{tf_name}"] = "⚪"
             time.sleep(0.1)
         rows.append(row)
         
@@ -290,11 +288,11 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
     msg += "\n"
 
     if not zdf.empty:
-        msg += "📈 <b>ZLSMA Trend (5 TFs)</b>\n"
+        msg += "📈 <b>ZLSMA Trend (5 TFs + Ind.)</b>\n"
         msg += "<pre>\n"
-        # 🟢 هدر جدول با ۵ تایم فریم و ۳ ستون کمکی
-        msg += f"{'Symbol':<9}|{'3m':<2}|{'5m':<2}|{'15m':<3}|{'1h':<2}|{'4h':<2}|{'CE':<2}|{'Vol':<3}|{'FVG':<3}|Scr\n"
-        msg += "-" * 55 + "\n"
+        # 🟢 هدر جدول با ستون‌های ترکیبی
+        msg += f"{'Sym':<8}|{'3m':<2}|{'5m':<2}|{'15m':<3}|{'1h':<2}|{'4h':<2}|{'CE':<7}|{'V/FVG':<9}|Scr\n"
+        msg += "-" * 60 + "\n"
         
         def get_icon(val):
             if val == "UP": return "🟢"
@@ -302,20 +300,28 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
             return "⚪"
 
         for _, r in zdf.iterrows():
-            sym_short = r['Symbol'][:9]
+            sym_short = r['Symbol'][:8]
             t3 = get_icon(r.get('3m'))
             t5 = get_icon(r.get('5m'))
             t15 = get_icon(r.get('15m'))
             t1h = get_icon(r.get('1h'))
             t4h = get_icon(r.get('4h'))
-            ce = r.get('CE', '⚪')
-            vol = r.get('Vol', '⚪')
-            fvg = r.get('FVG', '⚪')
+            
+            ce_1h = r.get('CE_1h', '⚪')
+            ce_4h = r.get('CE_4h', '⚪')
+            vf_1h = r.get('VF_1h', '⚪')
+            vf_4h = r.get('VF_4h', '⚪')
+            
+            # ترکیب وضعیت 1h و 4h برای Chandelier
+            ce_str = f"{ce_1h}1h {ce_4h}4h"
+            # ترکیب وضعیت حجم و FVG برای 1h و 4h
+            vf_str = f"{vf_1h}|{vf_4h}"
+            
             score = int(r['Score'])
-            msg += f"{sym_short:<9}|{t3} |{t5} |{t15}  |{t1h} |{t4h} |{ce} |{vol}  |{fvg}  |{score}/5\n"
+            msg += f"{sym_short:<8}|{t3} |{t5} |{t15}  |{t1h} |{t4h} |{ce_str:<7}|{vf_str:<9}|{score}/5\n"
             
         msg += "</pre>\n\n"
-        msg += "راهنما: CE=Chandelier, Vol=حجم, FVG=شکاف ارزش\n\n"
+        msg += "راهنما: CE=Chandelier (1h,4h) | V/FVG=حجم+شکاف ارزش (1h|4h)\n\n"
 
     if follow_ups:
         msg += "🔎 <b>نتیجه سیگنال‌های قبلی:</b>\n"
@@ -350,7 +356,7 @@ def main():
 
     usdt_tfs, current_dom = get_usdt_dominance_trend()
 
-    print("=" * 70); print("ZLSMA Ultimate Scanner (5 TFs)"); print("=" * 70)
+    print("=" * 70); print("ZLSMA Ultimate Scanner (5 TFs + Ind)"); print("=" * 70)
     zdf = scan_zlsma()
     print(zdf.to_string(index=False))
 
