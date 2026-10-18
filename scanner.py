@@ -178,7 +178,7 @@ def scan_zlsma():
                     row[f"CE_{tf_name}"] = "⚪"
                     row[f"Vol_{tf_name}"] = "⚪"
                     row[f"FVG_{tf_name}"] = "⚪"
-            time.sleep(1.0)  # Kraken rate limit
+            time.sleep(1.0)
         rows.append(row)
         
     df = pd.DataFrame(rows)
@@ -332,7 +332,6 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
     if not zdf.empty:
         msg += "📈 <b>ZLSMA Trend (4 TFs + Ind.)</b>\n"
         msg += "<pre>\n"
-        # 🟢 هدر جدول با ستون‌های جداگانه
         msg += f"{'Sym':<7}|{'5m':<2}|{'15m':<2}|{'1h':<2}|{'4h':<2}|{'CE':<6}|{'Vol':<5}|{'FVG':<5}|Scr\n"
         msg += "-" * 55 + "\n"
         
@@ -381,8 +380,16 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
         msg += f"💧 <b>ICT Liquidity Sweep</b> ({len(ict_df)} سیگنال)\n\n"
         for _, r in ict_df.iterrows():
             emo = "🟢" if r["Signal"] == "LONG" else "🔴"
+            
+            # 🟢 هشدار ریسک
+            risk_warning = ""
+            if "وسط" in r['Market Structure']:
+                risk_warning += " ⚠️(وسط)"
+            if "خلاف روند" in r['USDT.D Relation']:
+                risk_warning += " ⚠️(خلاف روند)"
+            
             msg += (f"{emo} <code>{r['Symbol']}</code> | TF: {r['TF']} | {r['Signal']} "
-                    f"| ⭐{r['Score']} | مرحله: {r['Stage']}\n"
+                    f"| ⭐{r['Score']} | مرحله: {r['Stage']}{risk_warning}\n"
                     f"   📍 ساختار: {r['Market Structure']}\n"
                     f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n")
         msg += "\n"
