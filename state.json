@@ -60,7 +60,7 @@
     "TF": "4h",
     "Signal": "SHORT",
     "Entry Price": 8.118000030517578,
-    "timestamp": 1792349718.3234541
+    "timestamp": 1792350948.6746848
   },
   "ict_HBAR/USDT_4h": {
     "Symbol": "HBAR/USDT",
@@ -110,12 +110,5 @@
     "Signal": "LONG",
     "Entry Price": 102.0999984741211,
     "timestamp": 1792341297.6420465
-  },
-  "ict_FIL/USDT_5m": {
-    "Symbol": "FIL/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 1.0219000577926636,
-    "timestamp": 1792349718.3234541
   }
 }
