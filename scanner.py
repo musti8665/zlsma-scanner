@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT + USDT.D + CCI 3-Line (Display Only)
+# Ultimate Scanner: ICT + USDT.D + CCI 3-Line + TTM Scalper
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -112,47 +112,32 @@ def get_usdt_dominance_trend():
             bias = "neutral"
             emoji = "➡️"
             
-            if rsi > 70:
-                rsi_state = "نزدیک مقاومت"
-            elif rsi < 30:
-                rsi_state = "نزدیک حمایت"
-            elif rsi > 50:
-                rsi_state = "بالای وسط"
-            else:
-                rsi_state = "زیر وسط"
+            if rsi > 70: rsi_state = "نزدیک مقاومت"
+            elif rsi < 30: rsi_state = "نزدیک حمایت"
+            elif rsi > 50: rsi_state = "بالای وسط"
+            else: rsi_state = "زیر وسط"
                 
-            if ema20 > ema50:
-                ema_state = "صعودی"
-            else:
-                ema_state = "نزولی"
+            ema_state = "صعودی" if ema20 > ema50 else "نزولی"
                 
-            if close > bb_upper:
-                bb_state = "مقاومت قوی"
-            elif close < bb_lower:
-                bb_state = "حمایت قوی"
-            else:
-                bb_state = "نوسان عادی"
+            if close > bb_upper: bb_state = "مقاومت قوی"
+            elif close < bb_lower: bb_state = "حمایت قوی"
+            else: bb_state = "نوسان عادی"
                 
             if rsi < 30 and ema20 > ema50:
                 analysis = f"🟢 صعودی قوی | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
-                bias = "bullish"
-                emoji = "📉"
+                bias = "bullish"; emoji = "📉"
             elif rsi < 50 and ema20 > ema50:
                 analysis = f"🟡 صعودی خفیف | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
-                bias = "bullish"
-                emoji = "📉"
+                bias = "bullish"; emoji = "📉"
             elif rsi > 70 and ema20 < ema50:
                 analysis = f"🔴 نزولی قوی | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
-                bias = "bearish"
-                emoji = "📈"
+                bias = "bearish"; emoji = "📈"
             elif rsi > 50 and ema20 < ema50:
                 analysis = f"🟠 نزولی خفیف | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
-                bias = "bearish"
-                emoji = "📈"
+                bias = "bearish"; emoji = "📈"
             else:
                 analysis = f"⚪ خنثی | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
-                bias = "neutral"
-                emoji = "➡️"
+                bias = "neutral"; emoji = "➡️"
                 
             results[tf] = {"trend": analysis, "bias": bias, "emoji": emoji}
         except Exception as e:
@@ -162,42 +147,53 @@ def get_usdt_dominance_trend():
     return results, current_dom
 
 # ==========================================
-# 🟢 محاسبه CCI 3-Line (فقط برای نمایش)
+# 🟢 محاسبه CCI 3-Line (فقط نمایش)
 # ==========================================
 def calculate_cci(df, length):
     tp = (df['high'] + df['low'] + df['close']) / 3
     sma = tp.rolling(length).mean()
     mad = tp.rolling(length).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
-    cci = (tp - sma) / (0.015 * mad)
-    return cci
+    return (tp - sma) / (0.015 * mad)
 
 def get_cci_display(df):
     cci5 = calculate_cci(df, 5).iloc[-1]
     cci13 = calculate_cci(df, 13).iloc[-1]
     cci52 = calculate_cci(df, 52).iloc[-1]
     
-    if pd.isna(cci5) or pd.isna(cci13) or pd.isna(cci52):
-        return "داده کافی نیست"
+    if pd.isna(cci5) or pd.isna(cci13) or pd.isna(cci52): return "داده کافی نیست"
         
-    status = ""
-    if cci5 > 0 and cci13 > 0 and cci52 > 0:
-        status = "🟢 همه بالای صفر (Long)"
-    elif cci5 < 0 and cci13 < 0 and cci52 < 0:
-        status = "🔴 همه زیر صفر (Short)"
-    else:
-        status = "⚪ مختلط (خنثی)"
+    if cci5 > 0 and cci13 > 0 and cci52 > 0: status = "🟢 همه بالای صفر (Long)"
+    elif cci5 < 0 and cci13 < 0 and cci52 < 0: status = "🔴 همه زیر صفر (Short)"
+    else: status = "⚪ مختلط (خنثی)"
         
-    # نمایش مقدار عددی هر سه خط برای دقت بیشتر
     return f"{status} (5:{cci5:.0f}, 13:{cci13:.0f}, 52:{cci52:.0f})"
+
+# ==========================================
+# 🟢 محاسبه TTM Scalper (فقط نمایش)
+# ==========================================
+def get_ttm_display(df):
+    # منطق: اگر کندل دوم > کندل اول و (کندل سوم > کندل دوم یا کندل چهارم > کندل دوم) => Buy
+    # اگر کندل دوم < کندل اول و (کندل سوم < کندل دوم یا کندل چهارم < کندل دوم) => Sell
+    if len(df) < 4: return "داده کافی نیست"
+    
+    c0 = df['close'].iloc[-1]
+    c1 = df['close'].iloc[-2]
+    c2 = df['close'].iloc[-3]
+    c3 = df['close'].iloc[-4]
+    
+    trigger_sell = (c1 < c0) and (c2 < c1 or c3 < c1)
+    trigger_buy = (c1 > c0) and (c2 > c1 or c3 > c1)
+    
+    if trigger_buy: return "🟢 Buy (تغییر به صعود)"
+    elif trigger_sell: return "🔴 Sell (تغییر به نزول)"
+    else: return "⚪ بدون تغییر (ادامه روند)"
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
     n = len(df); ph, pl = [], []
     for i in range(length, n - length):
-        if highs[i] == np.max(highs[i-length:i+length+1]):
-            ph.append({"index": i, "price": highs[i]})
-        if lows[i] == np.min(lows[i-length:i+length+1]):
-            pl.append({"index": i, "price": lows[i]})
+        if highs[i] == np.max(highs[i-length:i+length+1]): ph.append({"index": i, "price": highs[i]})
+        if lows[i] == np.min(lows[i-length:i+length+1]): pl.append({"index": i, "price": lows[i]})
     return ph, pl
 
 def analyze_market_structure(df, ph, pl, current_price):
@@ -242,13 +238,11 @@ def detect_sweeps(df, ph, pl):
     for lvl in reversed(active_ssl):
         if cl < lvl["price"] and cc > lvl["price"]:
             score, label, emoji = calculate_stage(df, lvl["price"], "LONG")
-            signals.append({"type":"LONG","level":lvl["price"],"price":cc,
-                            "score":score,"stage":label,"emoji":emoji}); break
+            signals.append({"type":"LONG","level":lvl["price"],"price":cc,"score":score,"stage":label,"emoji":emoji}); break
     for lvl in reversed(active_bsl):
         if ch > lvl["price"] and cc < lvl["price"]:
             score, label, emoji = calculate_stage(df, lvl["price"], "SHORT")
-            signals.append({"type":"SHORT","level":lvl["price"],"price":cc,
-                            "score":score,"stage":label,"emoji":emoji}); break
+            signals.append({"type":"SHORT","level":lvl["price"],"price":cc,"score":score,"stage":label,"emoji":emoji}); break
     return signals
 
 def scan_ict(usdt_tfs):
@@ -258,8 +252,7 @@ def scan_ict(usdt_tfs):
             try:
                 days = 30 if tf == "4h" else 7
                 df = yf.download(symbol, period=f"{days}d", interval=tf, progress=False)
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
+                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
                 if df.empty or len(df) < 60: continue
                 df = df[["Open","High","Low","Close","Volume"]].dropna()
                 df.columns = ["open","high","low","close","volume"]
@@ -267,22 +260,20 @@ def scan_ict(usdt_tfs):
                 
                 ph, pl = find_pivots(df)
                 signals = detect_sweeps(df, ph, pl)
-                
                 if not signals: continue
 
                 clean = symbol.replace("-USD", "/USDT").replace("32196", "")
                 current_price = df["close"].iloc[-1]
                 market_structure = analyze_market_structure(df, ph, pl, current_price)
                 
-                # 🟢 محاسبه CCI فقط برای نمایش
+                # 🟢 محاسبه CCI و TTM فقط برای نمایش
                 cci_display = get_cci_display(df)
+                ttm_display = get_ttm_display(df)
                 
-                if len(signals) > 1:
-                    signals = [max(signals, key=lambda x: x["score"])]
+                if len(signals) > 1: signals = [max(signals, key=lambda x: x["score"])]
 
                 for sig in signals:
-                    if sig["score"] < 2:
-                        continue
+                    if sig["score"] < 2: continue
                         
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "➡️"
@@ -294,7 +285,7 @@ def scan_ict(usdt_tfs):
                                     "Score": sig["score"], "Stage": sig["stage"],
                                     "Market Structure": market_structure,
                                     "USDT.D Relation": rel, "USDT.D Trend": trend_emoji,
-                                    "CCI": cci_display,
+                                    "CCI": cci_display, "TTM": ttm_display,
                                     "Entry Price": sig["price"], "Timestamp": time.time()})
             except Exception as e:
                 print(f"ICT {symbol} {tf} err: {str(e)[:80]}")
@@ -327,16 +318,15 @@ def build_message(usdt_tfs, current_dom, ict_df, follow_ups):
             emo = "🟢" if r["Signal"] == "LONG" else "🔴"
             
             risk_warning = ""
-            if "وسط" in r['Market Structure']:
-                risk_warning += " ⚠️(وسط)"
-            if "خلاف روند" in r['USDT.D Relation']:
-                risk_warning += " ⚠️(خلاف روند)"
+            if "وسط" in r['Market Structure']: risk_warning += " ⚠️(وسط)"
+            if "خلاف روند" in r['USDT.D Relation']: risk_warning += " ⚠️(خلاف روند)"
             
             msg += (f"{emo} <code>{r['Symbol']}</code> | TF: {r['TF']} | {r['Signal']} "
                     f"| ⭐{r['Score']} | مرحله: {r['Stage']}{risk_warning}\n"
                     f"   📍 ساختار: {r['Market Structure']}\n"
                     f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n"
-                    f"   📊 CCI: {r['CCI']}\n")
+                    f"   📊 CCI: {r['CCI']}\n"
+                    f"   ⚡ TTM: {r['TTM']}\n")
         msg += "\n"
 
     if ict_df.empty and not follow_ups:
@@ -366,24 +356,17 @@ def main():
                 elapsed = now_ts - data["timestamp"]
                 if elapsed >= FOLLOW_UP_TIMES[tf]:
                     current_df = yf.download(data["Symbol"] + "-USD", period="7d", interval=tf, progress=False)
-                    if isinstance(current_df.columns, pd.MultiIndex):
-                        current_df.columns = current_df.columns.get_level_values(0)
+                    if isinstance(current_df.columns, pd.MultiIndex): current_df.columns = current_df.columns.get_level_values(0)
                     if not current_df.empty and len(current_df) > 0:
                         current_df = current_df.iloc[:-1]
                         current_price = current_df["Close"].iloc[-1]
                         entry_price = data["Entry Price"]
-                        if data["Signal"] == "LONG":
-                            profit = (current_price - entry_price) / entry_price * 100
-                        else:
-                            profit = (entry_price - current_price) / entry_price * 100
-                        follow_ups.append({
-                            "Symbol": data["Symbol"], "TF": tf, 
-                            "Signal": data["Signal"], "profit": profit
-                        })
+                        if data["Signal"] == "LONG": profit = (current_price - entry_price) / entry_price * 100
+                        else: profit = (entry_price - current_price) / entry_price * 100
+                        follow_ups.append({"Symbol": data["Symbol"], "TF": tf, "Signal": data["Signal"], "profit": profit})
                     keys_to_remove.append(key)
 
-    for k in keys_to_remove:
-        del state[k]
+    for k in keys_to_remove: del state[k]
 
     new_ict = []
     FIFTEEN_MIN = 15 * 60
@@ -396,26 +379,19 @@ def main():
         if key in state and isinstance(state[key], dict):
             last_type = state[key].get("Signal")
             last_ts = state[key].get("timestamp", 0)
-            if sig_type != last_type or (now_ts - last_ts) >= FIFTEEN_MIN:
-                is_new = True
-        else:
-            is_new = True
+            if sig_type != last_type or (now_ts - last_ts) >= FIFTEEN_MIN: is_new = True
+        else: is_new = True
             
         if is_new:
             new_ict.append(r)
-            state[key] = {
-                "Symbol": sym, "TF": tf, "Signal": sig_type,
-                "Entry Price": r["Entry Price"], "timestamp": now_ts
-            }
+            state[key] = {"Symbol": sym, "TF": tf, "Signal": sig_type, "Entry Price": r["Entry Price"], "timestamp": now_ts}
 
     ict_new_df = pd.DataFrame(new_ict) if new_ict else pd.DataFrame()
     save_state(state)
 
     msg = build_message(usdt_tfs, current_dom, ict_new_df, follow_ups)
-    if msg:
-        print("\nTelegram sent:", send_telegram(msg))
-    else:
-        print("\nNo alerts to send.")
+    if msg: print("\nTelegram sent:", send_telegram(msg))
+    else: print("\nNo alerts to send.")
 
 if __name__ == "__main__":
     main()
