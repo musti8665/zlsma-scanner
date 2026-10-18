@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT Only + Smart USDT.D (RSI + EMA + BB)
+# Ultimate Scanner: ICT + USDT.D + CCI 3-Line (Display Only)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -58,14 +58,13 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 # ==========================================
-# 🟢 تحلیل هوشمند دامیننس تتر در هر تایم‌فریم
+# 🟢 تحلیل دامیننس تتر (RSI + EMA + BB)
 # ==========================================
 def get_usdt_dominance_trend():
     tfs = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h"}
     results = {}
     current_dom = None
     
-    # گرفتن دامیننس فعلی
     try:
         r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
         data = r.json()["data"]
@@ -77,7 +76,6 @@ def get_usdt_dominance_trend():
 
     for tf, interval in tfs.items():
         try:
-            # دریافت دیتا در همان تایم‌فریم
             days = 2 if tf in ["5m", "15m"] else 7 if tf == "1h" else 30
             df = yf.download("USDT-USD", period=f"{days}d", interval=interval, progress=False)
             
@@ -88,24 +86,20 @@ def get_usdt_dominance_trend():
             df = df[["Open","High","Low","Close"]].dropna()
             df.columns = ["open","high","low","close"]
             
-            # 🟢 ۱. محاسبه RSI (۱۴ دوره)
             delta = df['close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rs = gain / loss
             df['rsi'] = 100 - (100 / (1 + rs))
             
-            # 🟢 ۲. محاسبه EMA ۲۰ و ۵۰
             df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
             df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
             
-            # 🟢 ۳. محاسبه Bollinger Bands (۲۰ دوره)
             df['bb_mid'] = df['close'].rolling(20).mean()
             df['bb_std'] = df['close'].rolling(20).std()
             df['bb_upper'] = df['bb_mid'] + (df['bb_std'] * 2)
             df['bb_lower'] = df['bb_mid'] - (df['bb_std'] * 2)
             
-            # آخرین مقادیر
             last = df.iloc[-1]
             rsi = last['rsi']
             ema20 = last['ema20']
@@ -114,36 +108,31 @@ def get_usdt_dominance_trend():
             bb_upper = last['bb_upper']
             bb_lower = last['bb_lower']
             
-            # 🟢 منطق تصمیم‌گیری
             analysis = ""
             bias = "neutral"
             emoji = "➡️"
             
-            # تعیین وضعیت بر اساس RSI
             if rsi > 70:
-                rsi_state = "نزدیک مقاومت (اشباع خرید)"
+                rsi_state = "نزدیک مقاومت"
             elif rsi < 30:
-                rsi_state = "نزدیک حمایت (اشباع فروش)"
+                rsi_state = "نزدیک حمایت"
             elif rsi > 50:
-                rsi_state = "بالای وسط (نزولی خفیف)"
+                rsi_state = "بالای وسط"
             else:
-                rsi_state = "زیر وسط (صعودی خفیف)"
+                rsi_state = "زیر وسط"
                 
-            # تعیین وضعیت بر اساس EMA
             if ema20 > ema50:
-                ema_state = "روند صعودی"
+                ema_state = "صعودی"
             else:
-                ema_state = "روند نزولی"
+                ema_state = "نزولی"
                 
-            # تعیین وضعیت بر اساس Bollinger
             if close > bb_upper:
-                bb_state = "بالاتر از باند بالا (مقاومت قوی)"
+                bb_state = "مقاومت قوی"
             elif close < bb_lower:
-                bb_state = "پایین‌تر از باند پایین (حمایت قوی)"
+                bb_state = "حمایت قوی"
             else:
-                bb_state = "داخل باندها (نوسان عادی)"
+                bb_state = "نوسان عادی"
                 
-            # ترکیب نهایی
             if rsi < 30 and ema20 > ema50:
                 analysis = f"🟢 صعودی قوی | RSI: {rsi:.1f} | {ema_state} | {bb_state}"
                 bias = "bullish"
@@ -171,6 +160,35 @@ def get_usdt_dominance_trend():
             results[tf] = {"trend": "خطا در تحلیل", "bias": "neutral", "emoji": "➡️"}
             
     return results, current_dom
+
+# ==========================================
+# 🟢 محاسبه CCI 3-Line (فقط برای نمایش)
+# ==========================================
+def calculate_cci(df, length):
+    tp = (df['high'] + df['low'] + df['close']) / 3
+    sma = tp.rolling(length).mean()
+    mad = tp.rolling(length).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
+    cci = (tp - sma) / (0.015 * mad)
+    return cci
+
+def get_cci_display(df):
+    cci5 = calculate_cci(df, 5).iloc[-1]
+    cci13 = calculate_cci(df, 13).iloc[-1]
+    cci52 = calculate_cci(df, 52).iloc[-1]
+    
+    if pd.isna(cci5) or pd.isna(cci13) or pd.isna(cci52):
+        return "داده کافی نیست"
+        
+    status = ""
+    if cci5 > 0 and cci13 > 0 and cci52 > 0:
+        status = "🟢 همه بالای صفر (Long)"
+    elif cci5 < 0 and cci13 < 0 and cci52 < 0:
+        status = "🔴 همه زیر صفر (Short)"
+    else:
+        status = "⚪ مختلط (خنثی)"
+        
+    # نمایش مقدار عددی هر سه خط برای دقت بیشتر
+    return f"{status} (5:{cci5:.0f}, 13:{cci13:.0f}, 52:{cci52:.0f})"
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -256,6 +274,9 @@ def scan_ict(usdt_tfs):
                 current_price = df["close"].iloc[-1]
                 market_structure = analyze_market_structure(df, ph, pl, current_price)
                 
+                # 🟢 محاسبه CCI فقط برای نمایش
+                cci_display = get_cci_display(df)
+                
                 if len(signals) > 1:
                     signals = [max(signals, key=lambda x: x["score"])]
 
@@ -273,6 +294,7 @@ def scan_ict(usdt_tfs):
                                     "Score": sig["score"], "Stage": sig["stage"],
                                     "Market Structure": market_structure,
                                     "USDT.D Relation": rel, "USDT.D Trend": trend_emoji,
+                                    "CCI": cci_display,
                                     "Entry Price": sig["price"], "Timestamp": time.time()})
             except Exception as e:
                 print(f"ICT {symbol} {tf} err: {str(e)[:80]}")
@@ -313,7 +335,8 @@ def build_message(usdt_tfs, current_dom, ict_df, follow_ups):
             msg += (f"{emo} <code>{r['Symbol']}</code> | TF: {r['TF']} | {r['Signal']} "
                     f"| ⭐{r['Score']} | مرحله: {r['Stage']}{risk_warning}\n"
                     f"   📍 ساختار: {r['Market Structure']}\n"
-                    f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n")
+                    f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n"
+                    f"   📊 CCI: {r['CCI']}\n")
         msg += "\n"
 
     if ict_df.empty and not follow_ups:
