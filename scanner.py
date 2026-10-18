@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT + USDT.D + CCI 3-Line + TTM Scalper
+# Ultimate Scanner: ICT (No Score Limit) + USDT.D + CCI + TTM
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -172,8 +172,6 @@ def get_cci_display(df):
 # 🟢 محاسبه TTM Scalper (فقط نمایش)
 # ==========================================
 def get_ttm_display(df):
-    # منطق: اگر کندل دوم > کندل اول و (کندل سوم > کندل دوم یا کندل چهارم > کندل دوم) => Buy
-    # اگر کندل دوم < کندل اول و (کندل سوم < کندل دوم یا کندل چهارم < کندل دوم) => Sell
     if len(df) < 4: return "داده کافی نیست"
     
     c0 = df['close'].iloc[-1]
@@ -266,14 +264,14 @@ def scan_ict(usdt_tfs):
                 current_price = df["close"].iloc[-1]
                 market_structure = analyze_market_structure(df, ph, pl, current_price)
                 
-                # 🟢 محاسبه CCI و TTM فقط برای نمایش
                 cci_display = get_cci_display(df)
                 ttm_display = get_ttm_display(df)
                 
+                # 🟢 محدودیت انتخاب یک سیگنال در هر تایم‌فریم حفظ شد
                 if len(signals) > 1: signals = [max(signals, key=lambda x: x["score"])]
 
                 for sig in signals:
-                    if sig["score"] < 2: continue
+                    # 🟢 محدودیت امتیاز (Score) حذف شد
                         
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "➡️"
@@ -369,7 +367,7 @@ def main():
     for k in keys_to_remove: del state[k]
 
     new_ict = []
-    FIFTEEN_MIN = 15 * 60
+    FIFTEEN_MIN = 15 * 60 # 🟢 ضد اسپم ۱۵ دقیقه‌ای حفظ شد
 
     for _, r in ict_df.iterrows() if not ict_df.empty else []:
         sym = r['Symbol']; tf = r['TF']; sig_type = r['Signal'] 
