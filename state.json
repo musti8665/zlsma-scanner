@@ -38,13 +38,6 @@
   "ict_FIL/USDT_15m": "LONG_1792233663.9461892",
   "ict_SEI/USDT_15m": "LONG_1792268574.8408837",
   "ict_FIL/USDT_1h": "LONG_1792239843.7359354",
-  "ict_SHIB/USDT_1h": {
-    "Symbol": "SHIB/USDT",
-    "TF": "1h",
-    "Signal": "LONG",
-    "Entry Price": 4.900000021734741e-06,
-    "timestamp": 1792338327.1849747
-  },
   "ict_SEI/USDT_1h": "LONG_1792276179.4143524",
   "ict_FET/USDT_4h": {
     "Symbol": "FET/USDT",
@@ -67,14 +60,7 @@
     "TF": "4h",
     "Signal": "SHORT",
     "Entry Price": 8.118000030517578,
-    "timestamp": 1792341297.6420465
-  },
-  "ict_FIL/USDT_4h": {
-    "Symbol": "FIL/USDT",
-    "TF": "4h",
-    "Signal": "SHORT",
-    "Entry Price": 1.0614999532699585,
-    "timestamp": 1792334170.715406
+    "timestamp": 1792349718.3234541
   },
   "ict_HBAR/USDT_4h": {
     "Symbol": "HBAR/USDT",
@@ -104,32 +90,11 @@
     "Entry Price": 0.4763999879360199,
     "timestamp": 1792341297.6420465
   },
-  "ict_NEAR/USDT_4h": {
-    "Symbol": "NEAR/USDT",
-    "TF": "4h",
-    "Signal": "LONG",
-    "Entry Price": 4.925000190734863,
-    "timestamp": 1792334971.3215911
-  },
-  "ict_HBAR/USDT_1h": {
-    "Symbol": "HBAR/USDT",
-    "TF": "1h",
-    "Signal": "SHORT",
-    "Entry Price": 0.08574000000953674,
-    "timestamp": 1792341297.6420465
-  },
   "ict_HYPE/USDT_4h": {
     "Symbol": "HYPE/USDT",
     "TF": "4h",
     "Signal": "LONG",
     "Entry Price": 77.47000122070312,
-    "timestamp": 1792341297.6420465
-  },
-  "ict_WIF/USDT_1h": {
-    "Symbol": "WIF/USDT",
-    "TF": "1h",
-    "Signal": "LONG",
-    "Entry Price": 0.19280999898910522,
     "timestamp": 1792341297.6420465
   },
   "ict_AVAX/USDT_4h": {
@@ -139,34 +104,6 @@
     "Entry Price": 9.76200008392334,
     "timestamp": 1792338327.1849747
   },
-  "ict_ADA/USDT_1h": {
-    "Symbol": "ADA/USDT",
-    "TF": "1h",
-    "Signal": "LONG",
-    "Entry Price": 0.2161400020122528,
-    "timestamp": 1792338327.1849747
-  },
-  "ict_RUNE/USDT_1h": {
-    "Symbol": "RUNE/USDT",
-    "TF": "1h",
-    "Signal": "LONG",
-    "Entry Price": 0.6206081509590149,
-    "timestamp": 1792338327.1849747
-  },
-  "ict_DOGE/USDT_1h": {
-    "Symbol": "DOGE/USDT",
-    "TF": "1h",
-    "Signal": "LONG",
-    "Entry Price": 0.07785999774932861,
-    "timestamp": 1792338327.1849747
-  },
-  "ict_SEI/USDT_5m": {
-    "Symbol": "SEI/USDT",
-    "TF": "5m",
-    "Signal": "SHORT",
-    "Entry Price": 0.060180000960826874,
-    "timestamp": 1792341297.6420465
-  },
   "ict_SOL/USDT_4h": {
     "Symbol": "SOL/USDT",
     "TF": "4h",
@@ -174,11 +111,11 @@
     "Entry Price": 102.0999984741211,
     "timestamp": 1792341297.6420465
   },
-  "ict_HYPE/USDT_1h": {
-    "Symbol": "HYPE/USDT",
-    "TF": "1h",
+  "ict_FIL/USDT_5m": {
+    "Symbol": "FIL/USDT",
+    "TF": "5m",
     "Signal": "LONG",
-    "Entry Price": 77.47000122070312,
-    "timestamp": 1792341297.6420465
+    "Entry Price": 1.0219000577926636,
+    "timestamp": 1792349718.3234541
   }
 }
