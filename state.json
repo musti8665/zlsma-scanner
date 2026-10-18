@@ -54,7 +54,13 @@
     "Entry Price": 153.52000427246094,
     "timestamp": 1792338327.1849747
   },
-  "ict_RUNE/USDT_15m": "LONG_1792276179.4143524",
+  "ict_RUNE/USDT_15m": {
+    "Symbol": "RUNE/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 0.641970694065094,
+    "timestamp": 1792351529.7636573
+  },
   "ict_INJ/USDT_4h": {
     "Symbol": "INJ/USDT",
     "TF": "4h",
