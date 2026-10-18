@@ -13,8 +13,7 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
-# 🟢 ZLSMA Symbols (Kraken format: SHIBUSD, XBTUSD, ...)
-# برای ارزهایی که در Kraken نیستند، ERR نمایش داده می‌شود
+# 🟢 ZLSMA Symbols (Kraken format)
 ZLSMA_SYMBOLS = [
     "SHIBUSD","PEOPLEUSD","ZECUSD","ARKMUSD","TIAUSD",
     "ICPUSD","RUNEUSD","BOMEUSD","SEIUSD",
@@ -86,7 +85,6 @@ def fetch_kraken_klines(symbol, interval, limit=200):
             return None
             
         result = data.get("result", {})
-        # پیدا کردن کلید اصلی (Kraken گاهی کلید را تغییر می‌دهد)
         pair_keys = [k for k in result.keys() if k != "last"]
         if not pair_keys:
             return None
@@ -95,14 +93,12 @@ def fetch_kraken_klines(symbol, interval, limit=200):
         if not klines:
             return None
             
-        # Kraken format: [time, open, high, low, close, vwap, volume, count]
         df = pd.DataFrame(klines, columns=[
             "time","open","high","low","close","vwap","volume","count"
         ])
         for col in ["open","high","low","close","volume"]:
             df[col] = df[col].astype(float)
         
-        # حذف آخرین کندل (کندل در حال تشکیل)
         if len(df) > 1:
             df = df.iloc[:-1]
         return df
@@ -174,13 +170,15 @@ def scan_zlsma():
                     vol = "📊" if check_volume(df) else "➖"
                     fvg = "⚡" if check_fvg(df) else "➖"
                     row[f"CE_{tf_name}"] = ce
-                    row[f"VF_{tf_name}"] = f"{vol}{fvg}"
+                    row[f"Vol_{tf_name}"] = vol
+                    row[f"FVG_{tf_name}"] = fvg
             else:
                 row[tf_name] = "ERR"
                 if tf_name in ["1h", "4h"]:
                     row[f"CE_{tf_name}"] = "⚪"
-                    row[f"VF_{tf_name}"] = "⚪"
-            time.sleep(1.0)  # Kraken rate limit: 1 request per second
+                    row[f"Vol_{tf_name}"] = "⚪"
+                    row[f"FVG_{tf_name}"] = "⚪"
+            time.sleep(1.0)  # Kraken rate limit
         rows.append(row)
         
     df = pd.DataFrame(rows)
@@ -334,7 +332,8 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
     if not zdf.empty:
         msg += "📈 <b>ZLSMA Trend (4 TFs + Ind.)</b>\n"
         msg += "<pre>\n"
-        msg += f"{'Sym':<8}|{'5m':<2}|{'15m':<3}|{'1h':<2}|{'4h':<2}|{'CE':<7}|{'V/FVG':<9}|Scr\n"
+        # 🟢 هدر جدول با ستون‌های جداگانه
+        msg += f"{'Sym':<7}|{'5m':<2}|{'15m':<2}|{'1h':<2}|{'4h':<2}|{'CE':<6}|{'Vol':<5}|{'FVG':<5}|Scr\n"
         msg += "-" * 55 + "\n"
         
         def get_icon(val):
@@ -343,7 +342,7 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
             return "⚪"
 
         for _, r in zdf.iterrows():
-            sym_short = r['Symbol'][:8]
+            sym_short = r['Symbol'][:7]
             t5 = get_icon(r.get('5m'))
             t15 = get_icon(r.get('15m'))
             t1h = get_icon(r.get('1h'))
@@ -351,17 +350,20 @@ def build_message(zdf, usdt_tfs, current_dom, ict_df, follow_ups):
             
             ce_1h = r.get('CE_1h', '⚪')
             ce_4h = r.get('CE_4h', '⚪')
-            vf_1h = r.get('VF_1h', '⚪')
-            vf_4h = r.get('VF_4h', '⚪')
+            vol_1h = r.get('Vol_1h', '⚪')
+            vol_4h = r.get('Vol_4h', '⚪')
+            fvg_1h = r.get('FVG_1h', '⚪')
+            fvg_4h = r.get('FVG_4h', '⚪')
             
-            ce_str = f"{ce_1h}1h {ce_4h}4h"
-            vf_str = f"{vf_1h}|{vf_4h}"
+            ce_str = f"{ce_1h}{ce_4h}"
+            vol_str = f"{vol_1h}{vol_4h}"
+            fvg_str = f"{fvg_1h}{fvg_4h}"
             
             score = int(r['Score'])
-            msg += f"{sym_short:<8}|{t5} |{t15}  |{t1h} |{t4h} |{ce_str:<7}|{vf_str:<9}|{score}/4\n"
+            msg += f"{sym_short:<7}|{t5} |{t15} |{t1h} |{t4h} |{ce_str:<6}|{vol_str:<5}|{fvg_str:<5}|{score}/4\n"
             
         msg += "</pre>\n\n"
-        msg += "راهنما: CE=Chandelier (1h,4h) | V/FVG=حجم+شکاف ارزش (1h|4h)\n\n"
+        msg += "راهنما: CE=Chandelier | Vol=حجم | FVG=شکاف ارزش (ستون‌ها: اول 1h، دوم 4h)\n\n"
 
     if follow_ups:
         msg += "🔎 <b>نتیجه سیگنال‌های قبلی:</b>\n"
