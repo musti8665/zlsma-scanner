@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT + USDT.D + CCI + TTM (Smart Combo)
+# Ultimate Scanner: ICT + USDT.D + CCI + TTM + FVG
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -47,7 +47,6 @@ def send_telegram(msg):
         except Exception as e:
             print("TG exception:", e); return False
     else:
-        print("Message too long, splitting into chunks...")
         chunks = []
         current_chunk = ""
         for line in msg.split('\n'):
@@ -56,19 +55,14 @@ def send_telegram(msg):
             else:
                 chunks.append(current_chunk)
                 current_chunk = line + '\n'
-        if current_chunk:
-            chunks.append(current_chunk)
+        if current_chunk: chunks.append(current_chunk)
         success = True
         for i, chunk in enumerate(chunks):
             try:
                 r = requests.post(url, data={"chat_id": TG_CHAT, "text": chunk, "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=15)
-                if not r.ok:
-                    print(f"TG error part {i+1}:", r.text[:200])
-                    success = False
+                if not r.ok: success = False
                 time.sleep(1)
-            except Exception as e:
-                print(f"TG exception part {i+1}:", e)
-                success = False
+            except Exception: success = False
         return success
 
 def load_state():
@@ -158,7 +152,6 @@ def get_usdt_dominance_trend():
                 
             results[tf] = {"trend": analysis, "bias": bias, "emoji": emoji}
         except Exception as e:
-            print(f"USDT.D {tf} err: {e}")
             results[tf] = {"trend": "خطا در تحلیل", "bias": "neutral", "emoji": "➡️"}
             
     return results, current_dom
@@ -182,9 +175,6 @@ def get_cci_display(df):
         
     return f"{status} (5:{cci5:.0f}, 13:{cci13:.0f}, 52:{cci52:.0f})"
 
-# ==========================================
-# 🟢 TTM هوشمند (همیشه وضعیت روند را نشان می‌دهد)
-# ==========================================
 def get_ttm_display(df):
     if len(df) < 30: return "داده کافی نیست"
     
@@ -196,7 +186,6 @@ def get_ttm_display(df):
     trigger_sell = (c1 < c0) and (c2 < c1 or c3 < c1)
     trigger_buy = (c1 > c0) and (c2 > c1 or c3 > c1)
     
-    # MACD
     ema12 = df['close'].ewm(span=12, adjust=False).mean()
     ema26 = df['close'].ewm(span=26, adjust=False).mean()
     macd_line = ema12 - ema26
@@ -206,36 +195,39 @@ def get_ttm_display(df):
     macd_bullish = macd_line.iloc[-1] > signal_line.iloc[-1] and macd_hist.iloc[-1] > 0
     macd_bearish = macd_line.iloc[-1] < signal_line.iloc[-1] and macd_hist.iloc[-1] < 0
     
-    # Volume
     avg_vol = df['volume'].rolling(20).mean().iloc[-1]
     last_vol = df['volume'].iloc[-1]
     high_volume = last_vol > avg_vol * 1.2
     
     if trigger_buy:
-        if macd_bullish and high_volume:
-            return "🟢🟢 Strong Buy (TTM+MACD+Vol)"
-        elif macd_bullish or high_volume:
-            return "🟢 Buy (تایید نسبی)"
-        else:
-            return "🟡 Weak Buy (بدون تایید)"
+        if macd_bullish and high_volume: return "🟢🟢 Strong Buy"
+        elif macd_bullish or high_volume: return "🟢 Buy"
+        else: return "🟡 Weak Buy"
     elif trigger_sell:
-        if macd_bearish and high_volume:
-            return "🔴🔴 Strong Sell (TTM+MACD+Vol)"
-        elif macd_bearish or high_volume:
-            return "🔴 Sell (تایید نسبی)"
-        else:
-            return "🟠 Weak Sell (بدون تایید)"
+        if macd_bearish and high_volume: return "🔴🔴 Strong Sell"
+        elif macd_bearish or high_volume: return "🔴 Sell"
+        else: return "🟠 Weak Sell"
     else:
-        # 🟢 اگر تغییر روند نبود، وضعیت فعلی را بر اساس MACD و EMA نشان بده
         ema20 = df['close'].ewm(span=20, adjust=False).mean().iloc[-1]
-        if c0 > ema20 and macd_bullish:
-            return "🟢 Uptrend (ادامه صعود)"
-        elif c0 < ema20 and macd_bearish:
-            return "🔴 Downtrend (ادامه نزول)"
-        elif c0 > ema20:
-            return "🟡 Mild Uptrend (صعودی ضعیف)"
-        else:
-            return "🟠 Mild Downtrend (نزولی ضعیف)"
+        if c0 > ema20 and macd_bullish: return "🟢 Uptrend"
+        elif c0 < ema20 and macd_bearish: return "🔴 Downtrend"
+        elif c0 > ema20: return "🟡 Mild Uptrend"
+        else: return "🟠 Mild Downtrend"
+
+# ==========================================
+# 🟢 اندیکاتور FVG (Fair Value Gap)
+# ==========================================
+def get_fvg_display(df):
+    if len(df) < 3: return "No Data"
+    
+    # Bullish FVG: Low of current > High of 2 bars ago
+    if df['low'].iloc[-1] > df['high'].iloc[-3]:
+        return "🟢 Bullish FVG (شکاف صعودی)"
+    # Bearish FVG: High of current < Low of 2 bars ago
+    elif df['high'].iloc[-1] < df['low'].iloc[-3]:
+        return "🔴 Bearish FVG (شکاف نزولی)"
+    else:
+        return "⚪ No FVG"
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -317,6 +309,7 @@ def scan_ict(usdt_tfs):
                 
                 cci_display = get_cci_display(df)
                 ttm_display = get_ttm_display(df)
+                fvg_display = get_fvg_display(df) # 🟢 محاسبه FVG
                 
                 if len(signals) > 1: signals = [max(signals, key=lambda x: x["score"])]
 
@@ -324,7 +317,6 @@ def scan_ict(usdt_tfs):
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "➡️"
                     
-                    # 🟢 اصلاح منطق: تتر نزولی = صعود کریپتو
                     if sig["type"] == "LONG":
                         if bias == "bearish": rel = "موافق روند"
                         elif bias == "bullish": rel = "خلاف روند"
@@ -339,7 +331,7 @@ def scan_ict(usdt_tfs):
                                     "Score": sig["score"], "Stage": sig["stage"],
                                     "Market Structure": market_structure,
                                     "USDT.D Relation": rel, "USDT.D Trend": trend_emoji,
-                                    "CCI": cci_display, "TTM": ttm_display,
+                                    "CCI": cci_display, "TTM": ttm_display, "FVG": fvg_display,
                                     "Entry Price": sig["price"], "Timestamp": time.time()})
             except Exception as e:
                 print(f"ICT {symbol} {tf} err: {str(e)[:80]}")
@@ -380,7 +372,8 @@ def build_message(usdt_tfs, current_dom, ict_df, follow_ups):
                     f"   📍 ساختار: {r['Market Structure']}\n"
                     f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n"
                     f"   📊 CCI: {r['CCI']}\n"
-                    f"   ⚡ TTM: {r['TTM']}\n")
+                    f"   ⚡ TTM: {r['TTM']}\n"
+                    f"   🔍 FVG: {r['FVG']}\n") # 🟢 اضافه شدن FVG
         msg += "\n"
 
     if ict_df.empty and not follow_ups:
