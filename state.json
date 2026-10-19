@@ -133,13 +133,6 @@
     "Entry Price": 0.0003818437398876995,
     "timestamp": 1792431064.7882197
   },
-  "ict_WLD/USDT_5m": {
-    "Symbol": "WLD/USDT",
-    "TF": "5m",
-    "Signal": "SHORT",
-    "Entry Price": 0.5088000297546387,
-    "timestamp": 1792431064.7882197
-  },
   "ict_WLD/USDT_15m": {
     "Symbol": "WLD/USDT",
     "TF": "15m",
@@ -152,13 +145,6 @@
     "TF": "1h",
     "Signal": "SHORT",
     "Entry Price": 0.5091000199317932,
-    "timestamp": 1792431064.7882197
-  },
-  "ict_OP/USDT_5m": {
-    "Symbol": "OP/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 0.12428999692201614,
     "timestamp": 1792431064.7882197
   },
   "ict_OP/USDT_15m": {
@@ -182,11 +168,53 @@
     "Entry Price": 0.18791000545024872,
     "timestamp": 1792431064.7882197
   },
+  "ict_AVAX/USDT_5m": {
+    "Symbol": "AVAX/USDT",
+    "TF": "5m",
+    "Signal": "LONG",
+    "Entry Price": 9.583000183105469,
+    "timestamp": 1792431957.7993946
+  },
+  "ict_FIL/USDT_5m": {
+    "Symbol": "FIL/USDT",
+    "TF": "5m",
+    "Signal": "LONG",
+    "Entry Price": 1.0091999769210815,
+    "timestamp": 1792431957.7993946
+  },
+  "ict_FIL/USDT_15m": {
+    "Symbol": "FIL/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 1.0091999769210815,
+    "timestamp": 1792431957.7993946
+  },
+  "ict_HYPE/USDT_5m": {
+    "Symbol": "HYPE/USDT",
+    "TF": "5m",
+    "Signal": "LONG",
+    "Entry Price": 78.19000244140625,
+    "timestamp": 1792431957.7993946
+  },
+  "ict_HYPE/USDT_15m": {
+    "Symbol": "HYPE/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 78.19000244140625,
+    "timestamp": 1792431957.7993946
+  },
   "ict_ONDO/USDT_5m": {
     "Symbol": "ONDO/USDT",
     "TF": "5m",
     "Signal": "LONG",
-    "Entry Price": 0.43129000067710876,
-    "timestamp": 1792431064.7882197
+    "Entry Price": 0.43191999197006226,
+    "timestamp": 1792431957.7993946
+  },
+  "ict_ONDO/USDT_15m": {
+    "Symbol": "ONDO/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 0.43191999197006226,
+    "timestamp": 1792431957.7993946
   }
 }
