@@ -31,8 +31,8 @@
     "Symbol": "INJ/USDT",
     "TF": "4h",
     "Signal": "SHORT",
-    "Entry Price": 8.539999961853027,
-    "timestamp": 1792436487.5403821
+    "Entry Price": 8.494000434875488,
+    "timestamp": 1792444450.7890751
   },
   "ict_ICP/USDT_4h": {
     "Symbol": "ICP/USDT",
@@ -111,32 +111,11 @@
     "Entry Price": 0.00038218527333810925,
     "timestamp": 1792443669.2840223
   },
-  "ict_OP/USDT_5m": {
-    "Symbol": "OP/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 0.12323000282049179,
-    "timestamp": 1792443669.2840223
-  },
   "ict_OP/USDT_15m": {
     "Symbol": "OP/USDT",
     "TF": "15m",
     "Signal": "LONG",
     "Entry Price": 0.12323000282049179,
-    "timestamp": 1792443669.2840223
-  },
-  "ict_INJ/USDT_5m": {
-    "Symbol": "INJ/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 8.539999961853027,
-    "timestamp": 1792443669.2840223
-  },
-  "ict_THETA/USDT_5m": {
-    "Symbol": "THETA/USDT",
-    "TF": "5m",
-    "Signal": "SHORT",
-    "Entry Price": 0.18583819270133972,
     "timestamp": 1792443669.2840223
   },
   "ict_THETA/USDT_1h": {
@@ -151,13 +130,6 @@
     "TF": "15m",
     "Signal": "LONG",
     "Entry Price": 0.07924000173807144,
-    "timestamp": 1792443669.2840223
-  },
-  "ict_HBAR/USDT_5m": {
-    "Symbol": "HBAR/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 0.0820000022649765,
     "timestamp": 1792443669.2840223
   },
   "ict_HBAR/USDT_15m": {
@@ -195,11 +167,18 @@
     "Entry Price": 0.1882600039243698,
     "timestamp": 1792443669.2840223
   },
-  "ict_ONDO/USDT_5m": {
-    "Symbol": "ONDO/USDT",
+  "ict_OP/USDT_5m": {
+    "Symbol": "OP/USDT",
     "TF": "5m",
     "Signal": "LONG",
-    "Entry Price": 0.42985999584198,
-    "timestamp": 1792443669.2840223
+    "Entry Price": 0.12306000292301178,
+    "timestamp": 1792444450.7890751
+  },
+  "ict_ALGO/USDT_5m": {
+    "Symbol": "ALGO/USDT",
+    "TF": "5m",
+    "Signal": "SHORT",
+    "Entry Price": 0.1094600036740303,
+    "timestamp": 1792444450.7890751
   }
 }
