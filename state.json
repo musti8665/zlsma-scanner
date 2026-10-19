@@ -140,20 +140,6 @@
     "Entry Price": 0.5056999921798706,
     "timestamp": 1792426559.0076692
   },
-  "ict_SHIB/USDT_5m": {
-    "Symbol": "SHIB/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 5.020000116928713e-06,
-    "timestamp": 1792427472.240627
-  },
-  "ict_SEI/USDT_5m": {
-    "Symbol": "SEI/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 0.06111999973654747,
-    "timestamp": 1792427472.240627
-  },
   "ict_OP/USDT_15m": {
     "Symbol": "OP/USDT",
     "TF": "15m",
@@ -168,25 +154,11 @@
     "Entry Price": 0.18560296297073364,
     "timestamp": 1792427472.240627
   },
-  "ict_DOGE/USDT_5m": {
-    "Symbol": "DOGE/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 0.07936999946832657,
-    "timestamp": 1792427472.240627
-  },
   "ict_DOGE/USDT_15m": {
     "Symbol": "DOGE/USDT",
     "TF": "15m",
     "Signal": "LONG",
     "Entry Price": 0.07936999946832657,
-    "timestamp": 1792427472.240627
-  },
-  "ict_HYPE/USDT_5m": {
-    "Symbol": "HYPE/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 78.79000091552734,
     "timestamp": 1792427472.240627
   },
   "ict_ALGO/USDT_15m": {
@@ -203,18 +175,32 @@
     "Entry Price": 0.43584001064300537,
     "timestamp": 1792427472.240627
   },
-  "ict_GALA/USDT_5m": {
-    "Symbol": "GALA/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 0.0018945654155686498,
-    "timestamp": 1792427647.0482647
-  },
   "ict_GALA/USDT_15m": {
     "Symbol": "GALA/USDT",
     "TF": "15m",
     "Signal": "LONG",
     "Entry Price": 0.0018945654155686498,
     "timestamp": 1792427647.0482647
+  },
+  "ict_SEI/USDT_5m": {
+    "Symbol": "SEI/USDT",
+    "TF": "5m",
+    "Signal": "LONG",
+    "Entry Price": 0.06094000115990639,
+    "timestamp": 1792428357.1999867
+  },
+  "ict_WIF/USDT_5m": {
+    "Symbol": "WIF/USDT",
+    "TF": "5m",
+    "Signal": "SHORT",
+    "Entry Price": 0.2008499950170517,
+    "timestamp": 1792428357.1999867
+  },
+  "ict_AAVE/USDT_15m": {
+    "Symbol": "AAVE/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 149.0,
+    "timestamp": 1792428357.1999867
   }
 }
