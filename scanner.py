@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT + USDT.D + CCI + TTM + FVG
+# Ultimate Scanner: ICT + USDT.D + CCI + TTM + Awesome Oscillator
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -152,6 +152,7 @@ def get_usdt_dominance_trend():
                 
             results[tf] = {"trend": analysis, "bias": bias, "emoji": emoji}
         except Exception as e:
+            print(f"USDT.D {tf} err: {e}")
             results[tf] = {"trend": "خطا در تحلیل", "bias": "neutral", "emoji": "➡️"}
             
     return results, current_dom
@@ -215,19 +216,26 @@ def get_ttm_display(df):
         else: return "🟠 Mild Downtrend"
 
 # ==========================================
-# 🟢 اندیکاتور FVG (Fair Value Gap)
+# 🟢 Awesome Oscillator (AO)
 # ==========================================
-def get_fvg_display(df):
-    if len(df) < 3: return "No Data"
+def get_ao_display(df):
+    if len(df) < 34: return "داده کافی نیست"
     
-    # Bullish FVG: Low of current > High of 2 bars ago
-    if df['low'].iloc[-1] > df['high'].iloc[-3]:
-        return "🟢 Bullish FVG (شکاف صعودی)"
-    # Bearish FVG: High of current < Low of 2 bars ago
-    elif df['high'].iloc[-1] < df['low'].iloc[-3]:
-        return "🔴 Bearish FVG (شکاف نزولی)"
+    # AO = SMA(5) - SMA(34) بر اساس (High+Low)/2
+    median_price = (df['high'] + df['low']) / 2
+    ao = median_price.rolling(5).mean() - median_price.rolling(34).mean()
+    
+    last_ao = ao.iloc[-1]
+    prev_ao = ao.iloc[-2]
+    
+    if last_ao > 0 and last_ao > prev_ao:
+        return "🟢 Bullish (صعودی)"
+    elif last_ao < 0 and last_ao < prev_ao:
+        return "🔴 Bearish (نزولی)"
+    elif last_ao > 0:
+        return "🟡 Weak Bullish (صعودی ضعیف)"
     else:
-        return "⚪ No FVG"
+        return "🟠 Weak Bearish (نزولی ضعیف)"
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -309,7 +317,7 @@ def scan_ict(usdt_tfs):
                 
                 cci_display = get_cci_display(df)
                 ttm_display = get_ttm_display(df)
-                fvg_display = get_fvg_display(df) # 🟢 محاسبه FVG
+                ao_display = get_ao_display(df) # 🟢 محاسبه AO
                 
                 if len(signals) > 1: signals = [max(signals, key=lambda x: x["score"])]
 
@@ -331,7 +339,7 @@ def scan_ict(usdt_tfs):
                                     "Score": sig["score"], "Stage": sig["stage"],
                                     "Market Structure": market_structure,
                                     "USDT.D Relation": rel, "USDT.D Trend": trend_emoji,
-                                    "CCI": cci_display, "TTM": ttm_display, "FVG": fvg_display,
+                                    "CCI": cci_display, "TTM": ttm_display, "AO": ao_display,
                                     "Entry Price": sig["price"], "Timestamp": time.time()})
             except Exception as e:
                 print(f"ICT {symbol} {tf} err: {str(e)[:80]}")
@@ -373,7 +381,7 @@ def build_message(usdt_tfs, current_dom, ict_df, follow_ups):
                     f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n"
                     f"   📊 CCI: {r['CCI']}\n"
                     f"   ⚡ TTM: {r['TTM']}\n"
-                    f"   🔍 FVG: {r['FVG']}\n") # 🟢 اضافه شدن FVG
+                    f"   📈 AO: {r['AO']}\n") # 🟢 اضافه شدن AO
         msg += "\n"
 
     if ict_df.empty and not follow_ups:
