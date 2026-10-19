@@ -183,7 +183,7 @@ def get_cci_display(df):
     return f"{status} (5:{cci5:.0f}, 13:{cci13:.0f}, 52:{cci52:.0f})"
 
 # ==========================================
-# 🟢 TTM هوشمند (ترکیب TTM + MACD + Volume)
+# 🟢 TTM هوشمند (همیشه وضعیت روند را نشان می‌دهد)
 # ==========================================
 def get_ttm_display(df):
     if len(df) < 30: return "داده کافی نیست"
@@ -226,7 +226,16 @@ def get_ttm_display(df):
         else:
             return "🟠 Weak Sell (بدون تایید)"
     else:
-        return "⚪ بدون تغییر (ادامه روند)"
+        # 🟢 اگر تغییر روند نبود، وضعیت فعلی را بر اساس MACD و EMA نشان بده
+        ema20 = df['close'].ewm(span=20, adjust=False).mean().iloc[-1]
+        if c0 > ema20 and macd_bullish:
+            return "🟢 Uptrend (ادامه صعود)"
+        elif c0 < ema20 and macd_bearish:
+            return "🔴 Downtrend (ادامه نزول)"
+        elif c0 > ema20:
+            return "🟡 Mild Uptrend (صعودی ضعیف)"
+        else:
+            return "🟠 Mild Downtrend (نزولی ضعیف)"
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -315,13 +324,14 @@ def scan_ict(usdt_tfs):
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "➡️"
                     
+                    # 🟢 اصلاح منطق: تتر نزولی = صعود کریپتو
                     if sig["type"] == "LONG":
-                        if bias == "bullish": rel = "موافق روند"
-                        elif bias == "bearish": rel = "خلاف روند"
-                        else: rel = "خنثی"
-                    elif sig["type"] == "SHORT":
                         if bias == "bearish": rel = "موافق روند"
                         elif bias == "bullish": rel = "خلاف روند"
+                        else: rel = "خنثی"
+                    elif sig["type"] == "SHORT":
+                        if bias == "bullish": rel = "موافق روند"
+                        elif bias == "bearish": rel = "خلاف روند"
                         else: rel = "خنثی"
                     else: rel = "خنثی"
                     
