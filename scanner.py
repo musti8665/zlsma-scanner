@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT + USDT.D + CCI + TTM (Auto-Split Messages)
+# Ultimate Scanner: ICT + USDT.D + CCI + TTM (Fixed TF Alignment)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -13,7 +13,6 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
-# 🟢 ارزهای مشکل‌دار (PEPE, STX, UNI) حذف شدند
 ICT_SYMBOLS = [
     "SHIB-USD","ICP-USD","SEI-USD","NOT-USD","WIF-USD","AVAX-USD",
     "WLD-USD","ADA-USD","NEAR-USD","OP-USD","BONK-USD",
@@ -47,7 +46,6 @@ def send_telegram(msg):
         
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     
-    # اگر پیام کمتر از ۴۰۰۰ کاراکتر بود، یکجا بفرست
     if len(msg) <= 4000:
         try:
             r = requests.post(url, data={"chat_id": TG_CHAT, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=15)
@@ -55,8 +53,6 @@ def send_telegram(msg):
             return r.ok
         except Exception as e:
             print("TG exception:", e); return False
-            
-    # اگر پیام طولانی بود، آن را به بخش‌های ۴۰۰۰ کاراکتری تقسیم کن
     else:
         print("Message too long, splitting into chunks...")
         chunks = []
@@ -78,11 +74,10 @@ def send_telegram(msg):
                 if not r.ok:
                     print(f"TG error part {i+1}:", r.text[:200])
                     success = False
-                time.sleep(1) # تاخیر برای جلوگیری از بلاک شدن
+                time.sleep(1)
             except Exception as e:
                 print(f"TG exception part {i+1}:", e)
                 success = False
-                
         return success
 
 def load_state():
@@ -99,6 +94,9 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
+# ==========================================
+# 🟢 تحلیل دقیق تتر در هر تایم‌فریم (مستقل)
+# ==========================================
 def get_usdt_dominance_trend():
     tfs = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h"}
     results = {}
@@ -303,6 +301,7 @@ def scan_ict(usdt_tfs):
                 if len(signals) > 1: signals = [max(signals, key=lambda x: x["score"])]
 
                 for sig in signals:
+                    # 🟢 استفاده از تحلیل تتر در همان تایم‌فریم سیگنال
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "➡️"
                     if bias == "bullish": rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
