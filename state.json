@@ -272,5 +272,33 @@
     "Signal": "LONG",
     "Entry Price": 0.4389199912548065,
     "timestamp": 1792423911.3096719
+  },
+  "ict_WIF/USDT_5m": {
+    "Symbol": "WIF/USDT",
+    "TF": "5m",
+    "Signal": "SHORT",
+    "Entry Price": 0.19991999864578247,
+    "timestamp": 1792424164.1649382
+  },
+  "ict_WLD/USDT_5m": {
+    "Symbol": "WLD/USDT",
+    "TF": "5m",
+    "Signal": "SHORT",
+    "Entry Price": 0.5087000131607056,
+    "timestamp": 1792424164.1649382
+  },
+  "ict_GALA/USDT_15m": {
+    "Symbol": "GALA/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 0.0019003297202289104,
+    "timestamp": 1792424164.1649382
+  },
+  "ict_FET/USDT_5m": {
+    "Symbol": "FET/USDT",
+    "TF": "5m",
+    "Signal": "SHORT",
+    "Entry Price": 0.19030000269412994,
+    "timestamp": 1792424164.1649382
   }
 }
