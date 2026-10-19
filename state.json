@@ -202,5 +202,19 @@
     "Signal": "LONG",
     "Entry Price": 0.43584001064300537,
     "timestamp": 1792427472.240627
+  },
+  "ict_GALA/USDT_5m": {
+    "Symbol": "GALA/USDT",
+    "TF": "5m",
+    "Signal": "LONG",
+    "Entry Price": 0.0018945654155686498,
+    "timestamp": 1792427647.0482647
+  },
+  "ict_GALA/USDT_15m": {
+    "Symbol": "GALA/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 0.0018945654155686498,
+    "timestamp": 1792427647.0482647
   }
 }
