@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT + USDT.D + CCI + TTM (Fixed TF Alignment)
+# Ultimate Scanner: ICT + USDT.D + CCI + TTM (Smart Combo)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -25,21 +25,14 @@ ICT_LOOKBACK_DAYS = 30
 PIVOT_LENGTH = 10
 MAX_ACTIVE_LEVELS = 5
 
-# 🟢 زمان‌های ضد اسپم بر اساس تایم‌فریم (به ثانیه)
 ANTI_SPAM_TIMES = {
-    "5m": 10 * 60,     # 10 دقیقه
-    "15m": 30 * 60,    # 30 دقیقه
-    "1h": 60 * 60,     # 1 ساعت
-    "4h": 2 * 60 * 60  # 2 ساعت
+    "5m": 10 * 60, "15m": 30 * 60, "1h": 60 * 60, "4h": 2 * 60 * 60
 }
 
 FOLLOW_UP_TIMES = {
     "5m": 5 * 60, "15m": 15 * 60, "1h": 60 * 60, "4h": 4 * 60 * 60
 }
 
-# ==========================================
-# 🟢 ارسال پیام به تلگرام (با قابلیت تقسیم پیام)
-# ==========================================
 def send_telegram(msg):
     if not TG_TOKEN or not TG_CHAT:
         print("Telegram not configured"); return False
@@ -57,7 +50,6 @@ def send_telegram(msg):
         print("Message too long, splitting into chunks...")
         chunks = []
         current_chunk = ""
-        
         for line in msg.split('\n'):
             if len(current_chunk) + len(line) + 1 <= 4000:
                 current_chunk += line + '\n'
@@ -66,7 +58,6 @@ def send_telegram(msg):
                 current_chunk = line + '\n'
         if current_chunk:
             chunks.append(current_chunk)
-            
         success = True
         for i, chunk in enumerate(chunks):
             try:
@@ -86,17 +77,13 @@ def load_state():
             with open(STATE_FILE) as f:
                 data = json.load(f)
                 if isinstance(data, dict): return data
-        except Exception:
-            pass
+        except Exception: pass
     return {}
 
 def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-# ==========================================
-# 🟢 تحلیل دقیق تتر در هر تایم‌فریم (مستقل)
-# ==========================================
 def get_usdt_dominance_trend():
     tfs = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h"}
     results = {}
@@ -108,8 +95,7 @@ def get_usdt_dominance_trend():
         r2 = requests.get("https://api.coingecko.com/api/v3/coins/tether", timeout=10)
         usdt_data = r2.json()
         current_dom = round((usdt_data["market_data"]["market_cap"]["usd"] / data["total_market_cap"]["usd"]) * 100, 2)
-    except:
-        pass
+    except: pass
 
     for tf, interval in tfs.items():
         try:
@@ -117,7 +103,7 @@ def get_usdt_dominance_trend():
             df = yf.download("USDT-USD", period=f"{days}d", interval=interval, progress=False)
             
             if df.empty or len(df) < 20:
-                results[tf] = {"trend": "داده کافی نیست", "bias": "neutral", "emoji": "➡️"}
+                results[tf] = {"trend": "No Data", "bias": "neutral", "emoji": "➡️"}
                 continue
 
             df = df[["Open","High","Low","Close"]].dropna()
@@ -138,16 +124,10 @@ def get_usdt_dominance_trend():
             df['bb_lower'] = df['bb_mid'] - (df['bb_std'] * 2)
             
             last = df.iloc[-1]
-            rsi = last['rsi']
-            ema20 = last['ema20']
-            ema50 = last['ema50']
-            close = last['close']
-            bb_upper = last['bb_upper']
-            bb_lower = last['bb_lower']
+            rsi = last['rsi']; ema20 = last['ema20']; ema50 = last['ema50']
+            close = last['close']; bb_upper = last['bb_upper']; bb_lower = last['bb_lower']
             
-            analysis = ""
-            bias = "neutral"
-            emoji = "➡️"
+            analysis = ""; bias = "neutral"; emoji = "➡️"
             
             if rsi > 70: rsi_state = "نزدیک مقاومت"
             elif rsi < 30: rsi_state = "نزدیک حمایت"
@@ -202,8 +182,11 @@ def get_cci_display(df):
         
     return f"{status} (5:{cci5:.0f}, 13:{cci13:.0f}, 52:{cci52:.0f})"
 
+# ==========================================
+# 🟢 TTM هوشمند (ترکیب TTM + MACD + Volume)
+# ==========================================
 def get_ttm_display(df):
-    if len(df) < 4: return "داده کافی نیست"
+    if len(df) < 30: return "داده کافی نیست"
     
     c0 = df['close'].iloc[-1]
     c1 = df['close'].iloc[-2]
@@ -213,9 +196,37 @@ def get_ttm_display(df):
     trigger_sell = (c1 < c0) and (c2 < c1 or c3 < c1)
     trigger_buy = (c1 > c0) and (c2 > c1 or c3 > c1)
     
-    if trigger_buy: return "🟢 Buy (تغییر به صعود)"
-    elif trigger_sell: return "🔴 Sell (تغییر به نزول)"
-    else: return "⚪ بدون تغییر (ادامه روند)"
+    # MACD
+    ema12 = df['close'].ewm(span=12, adjust=False).mean()
+    ema26 = df['close'].ewm(span=26, adjust=False).mean()
+    macd_line = ema12 - ema26
+    signal_line = macd_line.ewm(span=9, adjust=False).mean()
+    macd_hist = macd_line - signal_line
+    
+    macd_bullish = macd_line.iloc[-1] > signal_line.iloc[-1] and macd_hist.iloc[-1] > 0
+    macd_bearish = macd_line.iloc[-1] < signal_line.iloc[-1] and macd_hist.iloc[-1] < 0
+    
+    # Volume
+    avg_vol = df['volume'].rolling(20).mean().iloc[-1]
+    last_vol = df['volume'].iloc[-1]
+    high_volume = last_vol > avg_vol * 1.2
+    
+    if trigger_buy:
+        if macd_bullish and high_volume:
+            return "🟢🟢 Strong Buy (TTM+MACD+Vol)"
+        elif macd_bullish or high_volume:
+            return "🟢 Buy (تایید نسبی)"
+        else:
+            return "🟡 Weak Buy (بدون تایید)"
+    elif trigger_sell:
+        if macd_bearish and high_volume:
+            return "🔴🔴 Strong Sell (TTM+MACD+Vol)"
+        elif macd_bearish or high_volume:
+            return "🔴 Sell (تایید نسبی)"
+        else:
+            return "🟠 Weak Sell (بدون تایید)"
+    else:
+        return "⚪ بدون تغییر (ادامه روند)"
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -301,11 +312,17 @@ def scan_ict(usdt_tfs):
                 if len(signals) > 1: signals = [max(signals, key=lambda x: x["score"])]
 
                 for sig in signals:
-                    # 🟢 استفاده از تحلیل تتر در همان تایم‌فریم سیگنال
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "➡️"
-                    if bias == "bullish": rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
-                    elif bias == "bearish": rel = "موافق روند" if sig["type"]=="SHORT" else "خلاف روند"
+                    
+                    if sig["type"] == "LONG":
+                        if bias == "bullish": rel = "موافق روند"
+                        elif bias == "bearish": rel = "خلاف روند"
+                        else: rel = "خنثی"
+                    elif sig["type"] == "SHORT":
+                        if bias == "bearish": rel = "موافق روند"
+                        elif bias == "bullish": rel = "خلاف روند"
+                        else: rel = "خنثی"
                     else: rel = "خنثی"
                     
                     results.append({"Symbol": clean, "TF": tf, "Signal": sig["type"],
@@ -396,8 +413,6 @@ def main():
     for k in keys_to_remove: del state[k]
 
     new_ict = []
-    
-    # 🟢 سیستم ضد اسپم هوشمند بر اساس تایم‌فریم
     for _, r in ict_df.iterrows() if not ict_df.empty else []:
         sym = r['Symbol']; tf = r['TF']; sig_type = r['Signal'] 
         key = f"ict_{sym}_{tf}"
@@ -408,10 +423,8 @@ def main():
         if key in state and isinstance(state[key], dict):
             last_type = state[key].get("Signal")
             last_ts = state[key].get("timestamp", 0)
-            if sig_type != last_type or (now_ts - last_ts) >= anti_spam_seconds: 
-                is_new = True
-        else: 
-            is_new = True
+            if sig_type != last_type or (now_ts - last_ts) >= anti_spam_seconds: is_new = True
+        else: is_new = True
             
         if is_new:
             new_ict.append(r)
