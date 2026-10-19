@@ -273,43 +273,56 @@ def get_boll_macd_signal(df):
         return f"⚪ {bb_status}"
 
 # ==========================================
-# 🟢 MACD Support/Resistance (Heikin Ashi + MACD Cross)
+# 🟢 MACD Support/Resistance (کراس خط زرد و کانال)
 # ==========================================
 def get_macd_sr(df):
-    if len(df) < 30: return "داده کافی نیست"
+    if len(df) < 35: return "داده کافی نیست"
     
-    # شبیه‌سازی Heikin Ashi برای Close و High (برای سادگی از Close معمولی استفاده می‌کنیم)
-    ha_close = df['close']
     ha_high = df['high']
     ha_low = df['low']
     
-    # MACD روی HA Close
-    ema12 = ha_close.ewm(span=12, adjust=False).mean()
-    ema26 = ha_close.ewm(span=26, adjust=False).mean()
+    ema12 = df['close'].ewm(span=12, adjust=False).mean()
+    ema26 = df['close'].ewm(span=26, adjust=False).mean()
     macd_line = ema12 - ema26
     signal_line = macd_line.ewm(span=9, adjust=False).mean()
     
-    # پیدا کردن کراس‌ها
     cross_under = (macd_line.iloc[-2] >= signal_line.iloc[-2]) and (macd_line.iloc[-1] < signal_line.iloc[-1])
     cross_over = (macd_line.iloc[-2] <= signal_line.iloc[-2]) and (macd_line.iloc[-1] > signal_line.iloc[-1])
     
-    # محاسبه سطوح
     lookback = 11
     lookback_high = ha_high.rolling(lookback).max().iloc[-1]
     lookback_low = ha_low.rolling(lookback).min().iloc[-1]
     
-    if cross_under:
-        resistance = lookback_high
-        support = lookback_low
-        avg = (resistance + support) / 2
-        return f"🟢 New Resistance: {resistance:.4f} | Support: {support:.4f}"
-    elif cross_over:
-        resistance = lookback_high
-        support = lookback_low
-        avg = (resistance + support) / 2
-        return f"🔴 New Support: {support:.4f} | Resistance: {resistance:.4f}"
+    # میانگین (خط زرد)
+    avg = (lookback_high + lookback_low) / 2
+    
+    # قیمت فعلی
+    current_price = df['close'].iloc[-1]
+    prev_price = df['close'].iloc[-2]
+    
+    # کراس خط زرد (میانگین)
+    cross_up_avg = prev_price < avg and current_price > avg
+    cross_down_avg = prev_price > avg and current_price < avg
+    
+    # بررسی موقعیت نسبت به کانال
+    if current_price > lookback_high:
+        channel_status = "بالای کانال (شکست مقاومت)"
+    elif current_price < lookback_low:
+        channel_status = "زیر کانال (شکست حمایت)"
     else:
-        return "⚪ بدون کراس جدید (سطوح ثابت)"
+        channel_status = "داخل کانال"
+
+    # تصمیم‌گیری نهایی
+    if cross_up_avg and current_price > lookback_high:
+        return f"🟢 Long Signal: Cross Up + {channel_status}"
+    elif cross_down_avg and current_price < lookback_low:
+        return f"🔴 Short Signal: Cross Down + {channel_status}"
+    elif cross_up_avg:
+        return f"🟡 Weak Long: Cross Up but {channel_status}"
+    elif cross_down_avg:
+        return f"🟠 Weak Short: Cross Down but {channel_status}"
+    else:
+        return f"⚪ {channel_status} | Avg: {avg:.4f}"
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -393,7 +406,7 @@ def scan_ict(usdt_tfs):
                 ttm_display = get_ttm_display(df)
                 ao_display = get_ao_display(df)
                 bm_signal = get_boll_macd_signal(df)
-                sr_signal = get_macd_sr(df) # 🟢 محاسبه MACD S/R
+                sr_signal = get_macd_sr(df)
                 
                 if len(signals) > 1: signals = [max(signals, key=lambda x: x["score"])]
 
@@ -460,7 +473,7 @@ def build_message(usdt_tfs, current_dom, ict_df, follow_ups):
                     f"   ⚡ TTM: {r['TTM']}\n"
                     f"   📈 AO: {r['AO']}\n"
                     f"   📉 BOLL+MACD: {r['BM']}\n"
-                    f"   📏 MACD S/R: {r['SR']}\n") # 🟢 اضافه شدن MACD S/R
+                    f"   📏 MACD S/R: {r['SR']}\n")
         msg += "\n"
 
     if ict_df.empty and not follow_ups:
