@@ -2,8 +2,9 @@ name: ZLSMA + ICT Scanner
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch:
+    # هر ۵ دقیقه یک بار، اما در دقیقه‌های غیر رند (2، 7، 12، 17...) تا گیت‌هاب آن را لغو نکند
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
+  workflow_dispatch: # اجازه اجرای دستی
 
 permissions:
   contents: write
@@ -35,7 +36,7 @@ jobs:
           TG_CHAT:  ${{ secrets.TG_CHAT }}
         run: python scanner.py
 
-      - name: Save state
+      - name: Save state (keep-alive + anti-spam)
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
