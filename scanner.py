@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT + USDT.D + CCI + TTM + Awesome Oscillator
+# Ultimate Scanner: ICT + USDT.D + CCI + TTM + AO + Bollinger Strategy
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -215,27 +215,77 @@ def get_ttm_display(df):
         elif c0 > ema20: return "🟡 Mild Uptrend"
         else: return "🟠 Mild Downtrend"
 
-# ==========================================
-# 🟢 Awesome Oscillator (AO)
-# ==========================================
 def get_ao_display(df):
     if len(df) < 34: return "داده کافی نیست"
-    
-    # AO = SMA(5) - SMA(34) بر اساس (High+Low)/2
     median_price = (df['high'] + df['low']) / 2
     ao = median_price.rolling(5).mean() - median_price.rolling(34).mean()
-    
     last_ao = ao.iloc[-1]
     prev_ao = ao.iloc[-2]
     
-    if last_ao > 0 and last_ao > prev_ao:
-        return "🟢 Bullish (صعودی)"
-    elif last_ao < 0 and last_ao < prev_ao:
-        return "🔴 Bearish (نزولی)"
-    elif last_ao > 0:
-        return "🟡 Weak Bullish (صعودی ضعیف)"
+    if last_ao > 0 and last_ao > prev_ao: return "🟢 Bullish (صعودی)"
+    elif last_ao < 0 and last_ao < prev_ao: return "🔴 Bearish (نزولی)"
+    elif last_ao > 0: return "🟡 Weak Bullish (صعودی ضعیف)"
+    else: return "🟠 Weak Bearish (نزولی ضعیف)"
+
+# ==========================================
+# 🟢 استراتژی بولینگر + MACD (دقیقاً طبق کد Pine Script)
+# ==========================================
+def get_boll_macd_signal(df):
+    if len(df) < 30: return "داده کافی نیست"
+    
+    # Bollinger Bands
+    bb_center = df['close'].rolling(20).mean()
+    bb_std = df['close'].rolling(20).std()
+    bb_upper = bb_center + (bb_std * 2)
+    bb_lower = bb_center - (bb_std * 2)
+    
+    # MACD
+    ema12 = df['close'].ewm(span=12, adjust=False).mean()
+    ema26 = df['close'].ewm(span=26, adjust=False).mean()
+    macd_line = ema12 - ema26
+    signal_line = macd_line.ewm(span=9, adjust=False).mean()
+    
+    # ATR برای شرط bTouched
+    high = df['high']; low = df['low']; close = df['close']
+    tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+    atr = tr.rolling(20).mean()
+    
+    last_close = close.iloc[-1]
+    last_low = low.iloc[-1]
+    last_high = high.iloc[-1]
+    last_center = bb_center.iloc[-1]
+    last_atr = atr.iloc[-1]
+    
+    # شرط bTouched: سایه پایین زیر BOLL_center - ATR
+    bTouched_long = last_low < (last_center - last_atr)
+    # شرط bTouched برای شورت: سایه بالا بالای BOLL_center + ATR
+    bTouched_short = last_high > (last_center + last_atr)
+    
+    # شرط MACD Cross
+    macd_crossing_up = macd_line.iloc[-1] > macd_line.iloc[-2] and macd_line.iloc[-1] < signal_line.iloc[-1] and abs(macd_line.iloc[-1] - signal_line.iloc[-1]) < abs(macd_line.iloc[-2] - signal_line.iloc[-2])
+    macd_crossing_down = macd_line.iloc[-1] < macd_line.iloc[-2] and macd_line.iloc[-1] > signal_line.iloc[-1] and abs(macd_line.iloc[-1] - signal_line.iloc[-1]) < abs(macd_line.iloc[-2] - signal_line.iloc[-2])
+    
+    # وضعیت قیمت در باندها
+    if last_close > bb_upper.iloc[-1]:
+        bb_status = "بالای باند بالا (Overbought)"
+    elif last_close < bb_lower.iloc[-1]:
+        bb_status = "زیر باند پایین (Oversold)"
+    elif last_close > last_center:
+        bb_status = "بالای باند وسط"
     else:
-        return "🟠 Weak Bearish (نزولی ضعیف)"
+        bb_status = "زیر باند وسط"
+    
+    # ترکیب نهایی
+    if bTouched_long and macd_crossing_up:
+        return f"🟢 STRONG BUY (شرایط کامل) | {bb_status}"
+    elif bTouched_short and macd_crossing_down:
+        return f"🔴 STRONG SELL (شرایط کامل) | {bb_status}"
+    elif bTouched_long:
+        return f"🟡 Buy Zone (منتظر تایید MACD) | {bb_status}"
+    elif bTouched_short:
+        return f"🟠 Sell Zone (منتظر تایید MACD) | {bb_status}"
+    else:
+        return f"⚪ {bb_status}"
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
@@ -317,7 +367,8 @@ def scan_ict(usdt_tfs):
                 
                 cci_display = get_cci_display(df)
                 ttm_display = get_ttm_display(df)
-                ao_display = get_ao_display(df) # 🟢 محاسبه AO
+                ao_display = get_ao_display(df)
+                bm_signal = get_boll_macd_signal(df) # 🟢 محاسبه بولینگر + MACD
                 
                 if len(signals) > 1: signals = [max(signals, key=lambda x: x["score"])]
 
@@ -339,7 +390,7 @@ def scan_ict(usdt_tfs):
                                     "Score": sig["score"], "Stage": sig["stage"],
                                     "Market Structure": market_structure,
                                     "USDT.D Relation": rel, "USDT.D Trend": trend_emoji,
-                                    "CCI": cci_display, "TTM": ttm_display, "AO": ao_display,
+                                    "CCI": cci_display, "TTM": ttm_display, "AO": ao_display, "BM": bm_signal,
                                     "Entry Price": sig["price"], "Timestamp": time.time()})
             except Exception as e:
                 print(f"ICT {symbol} {tf} err: {str(e)[:80]}")
@@ -381,7 +432,8 @@ def build_message(usdt_tfs, current_dom, ict_df, follow_ups):
                     f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n"
                     f"   📊 CCI: {r['CCI']}\n"
                     f"   ⚡ TTM: {r['TTM']}\n"
-                    f"   📈 AO: {r['AO']}\n") # 🟢 اضافه شدن AO
+                    f"   📈 AO: {r['AO']}\n"
+                    f"   📉 BOLL+MACD: {r['BM']}\n")
         msg += "\n"
 
     if ict_df.empty and not follow_ups:
