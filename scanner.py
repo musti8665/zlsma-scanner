@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT (No Score Limit) + USDT.D + CCI + TTM
+# Ultimate Scanner: ICT + USDT.D + CCI + TTM (Auto-Split Messages)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -13,35 +13,77 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
 
+# 🟢 ارزهای مشکل‌دار (PEPE, STX, UNI) حذف شدند
 ICT_SYMBOLS = [
     "SHIB-USD","ICP-USD","SEI-USD","NOT-USD","WIF-USD","AVAX-USD",
-    "WLD-USD","PEPE-USD","ADA-USD","NEAR-USD","OP-USD","BONK-USD",
+    "WLD-USD","ADA-USD","NEAR-USD","OP-USD","BONK-USD",
     "SOL-USD","INJ-USD","FIL-USD","ARB-USD","GALA-USD","AAVE-USD",
-    "STX-USD","THETA-USD","RUNE-USD","DOGE-USD","HBAR-USD",
-    "HYPE32196-USD", "ALGO-USD", "FET-USD", "UNI-USD", "ONDO-USD"
+    "THETA-USD","RUNE-USD","DOGE-USD","HBAR-USD",
+    "HYPE32196-USD", "ALGO-USD", "FET-USD", "ONDO-USD"
 ]
 ICT_TF_LIST = ["5m", "15m", "1h", "4h"] 
 ICT_LOOKBACK_DAYS = 30
 PIVOT_LENGTH = 10
 MAX_ACTIVE_LEVELS = 5
 
+# 🟢 زمان‌های ضد اسپم بر اساس تایم‌فریم (به ثانیه)
+ANTI_SPAM_TIMES = {
+    "5m": 10 * 60,     # 10 دقیقه
+    "15m": 30 * 60,    # 30 دقیقه
+    "1h": 60 * 60,     # 1 ساعت
+    "4h": 2 * 60 * 60  # 2 ساعت
+}
+
 FOLLOW_UP_TIMES = {
     "5m": 5 * 60, "15m": 15 * 60, "1h": 60 * 60, "4h": 4 * 60 * 60
 }
 
+# ==========================================
+# 🟢 ارسال پیام به تلگرام (با قابلیت تقسیم پیام)
+# ==========================================
 def send_telegram(msg):
     if not TG_TOKEN or not TG_CHAT:
         print("Telegram not configured"); return False
+        
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    try:
-        r = requests.post(url, data={
-            "chat_id": TG_CHAT, "text": msg,
-            "parse_mode": "HTML", "disable_web_page_preview": True,
-        }, timeout=15)
-        if not r.ok: print("TG error:", r.text[:200])
-        return r.ok
-    except Exception as e:
-        print("TG exception:", e); return False
+    
+    # اگر پیام کمتر از ۴۰۰۰ کاراکتر بود، یکجا بفرست
+    if len(msg) <= 4000:
+        try:
+            r = requests.post(url, data={"chat_id": TG_CHAT, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=15)
+            if not r.ok: print("TG error:", r.text[:200])
+            return r.ok
+        except Exception as e:
+            print("TG exception:", e); return False
+            
+    # اگر پیام طولانی بود، آن را به بخش‌های ۴۰۰۰ کاراکتری تقسیم کن
+    else:
+        print("Message too long, splitting into chunks...")
+        chunks = []
+        current_chunk = ""
+        
+        for line in msg.split('\n'):
+            if len(current_chunk) + len(line) + 1 <= 4000:
+                current_chunk += line + '\n'
+            else:
+                chunks.append(current_chunk)
+                current_chunk = line + '\n'
+        if current_chunk:
+            chunks.append(current_chunk)
+            
+        success = True
+        for i, chunk in enumerate(chunks):
+            try:
+                r = requests.post(url, data={"chat_id": TG_CHAT, "text": chunk, "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=15)
+                if not r.ok:
+                    print(f"TG error part {i+1}:", r.text[:200])
+                    success = False
+                time.sleep(1) # تاخیر برای جلوگیری از بلاک شدن
+            except Exception as e:
+                print(f"TG exception part {i+1}:", e)
+                success = False
+                
+        return success
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -57,9 +99,6 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-# ==========================================
-# 🟢 تحلیل دامیننس تتر (RSI + EMA + BB)
-# ==========================================
 def get_usdt_dominance_trend():
     tfs = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h"}
     results = {}
@@ -146,9 +185,6 @@ def get_usdt_dominance_trend():
             
     return results, current_dom
 
-# ==========================================
-# 🟢 محاسبه CCI 3-Line (فقط نمایش)
-# ==========================================
 def calculate_cci(df, length):
     tp = (df['high'] + df['low'] + df['close']) / 3
     sma = tp.rolling(length).mean()
@@ -168,9 +204,6 @@ def get_cci_display(df):
         
     return f"{status} (5:{cci5:.0f}, 13:{cci13:.0f}, 52:{cci52:.0f})"
 
-# ==========================================
-# 🟢 محاسبه TTM Scalper (فقط نمایش)
-# ==========================================
 def get_ttm_display(df):
     if len(df) < 4: return "داده کافی نیست"
     
@@ -267,12 +300,9 @@ def scan_ict(usdt_tfs):
                 cci_display = get_cci_display(df)
                 ttm_display = get_ttm_display(df)
                 
-                # 🟢 محدودیت انتخاب یک سیگنال در هر تایم‌فریم حفظ شد
                 if len(signals) > 1: signals = [max(signals, key=lambda x: x["score"])]
 
                 for sig in signals:
-                    # 🟢 محدودیت امتیاز (Score) حذف شد
-                        
                     bias = usdt_tfs[tf]["bias"] if tf in usdt_tfs else "neutral"
                     trend_emoji = usdt_tfs[tf]["emoji"] if tf in usdt_tfs else "➡️"
                     if bias == "bullish": rel = "موافق روند" if sig["type"]=="LONG"  else "خلاف روند"
@@ -367,18 +397,22 @@ def main():
     for k in keys_to_remove: del state[k]
 
     new_ict = []
-    FIFTEEN_MIN = 15 * 60 # 🟢 ضد اسپم ۱۵ دقیقه‌ای حفظ شد
-
+    
+    # 🟢 سیستم ضد اسپم هوشمند بر اساس تایم‌فریم
     for _, r in ict_df.iterrows() if not ict_df.empty else []:
         sym = r['Symbol']; tf = r['TF']; sig_type = r['Signal'] 
         key = f"ict_{sym}_{tf}"
+        
+        anti_spam_seconds = ANTI_SPAM_TIMES.get(tf, 15 * 60)
         
         is_new = False
         if key in state and isinstance(state[key], dict):
             last_type = state[key].get("Signal")
             last_ts = state[key].get("timestamp", 0)
-            if sig_type != last_type or (now_ts - last_ts) >= FIFTEEN_MIN: is_new = True
-        else: is_new = True
+            if sig_type != last_type or (now_ts - last_ts) >= anti_spam_seconds: 
+                is_new = True
+        else: 
+            is_new = True
             
         if is_new:
             new_ict.append(r)
