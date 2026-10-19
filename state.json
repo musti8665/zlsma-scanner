@@ -49,13 +49,6 @@
     "Entry Price": 0.18584705889225006,
     "timestamp": 1792422079.0365014
   },
-  "ict_WLD/USDT_1h": {
-    "Symbol": "WLD/USDT",
-    "TF": "1h",
-    "Signal": "SHORT",
-    "Entry Price": 0.5094000101089478,
-    "timestamp": 1792419353.2389863
-  },
   "ict_SHIB/USDT_15m": {
     "Symbol": "SHIB/USDT",
     "TF": "15m",
@@ -110,13 +103,6 @@
     "TF": "1h",
     "Signal": "LONG",
     "Entry Price": 0.21819999814033508,
-    "timestamp": 1792422079.0365014
-  },
-  "ict_NEAR/USDT_5m": {
-    "Symbol": "NEAR/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 4.928999900817871,
     "timestamp": 1792422079.0365014
   },
   "ict_NEAR/USDT_15m": {
@@ -189,13 +175,6 @@
     "Entry Price": 0.6444936990737915,
     "timestamp": 1792422079.0365014
   },
-  "ict_DOGE/USDT_5m": {
-    "Symbol": "DOGE/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 0.07947999984025955,
-    "timestamp": 1792422079.0365014
-  },
   "ict_DOGE/USDT_15m": {
     "Symbol": "DOGE/USDT",
     "TF": "15m",
@@ -208,13 +187,6 @@
     "TF": "1h",
     "Signal": "LONG",
     "Entry Price": 0.07947999984025955,
-    "timestamp": 1792422079.0365014
-  },
-  "ict_HYPE/USDT_5m": {
-    "Symbol": "HYPE/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 78.80000305175781,
     "timestamp": 1792422079.0365014
   },
   "ict_HYPE/USDT_1h": {
@@ -251,5 +223,26 @@
     "Signal": "LONG",
     "Entry Price": 0.4373199939727783,
     "timestamp": 1792422079.0365014
+  },
+  "ict_SEI/USDT_5m": {
+    "Symbol": "SEI/USDT",
+    "TF": "5m",
+    "Signal": "SHORT",
+    "Entry Price": 0.06058000028133392,
+    "timestamp": 1792422957.5693393
+  },
+  "ict_WLD/USDT_1h": {
+    "Symbol": "WLD/USDT",
+    "TF": "1h",
+    "Signal": "SHORT",
+    "Entry Price": 0.5070000290870667,
+    "timestamp": 1792422957.5693393
+  },
+  "ict_THETA/USDT_1h": {
+    "Symbol": "THETA/USDT",
+    "TF": "1h",
+    "Signal": "LONG",
+    "Entry Price": 0.18636193871498108,
+    "timestamp": 1792422957.5693393
   }
 }
