@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT + USDT.D + CCI + TTM + AO + BOLL/MACD + MACD S/R
+# Ultimate Scanner: ICT + USDT.D + CCI + TTM + AO + BOLL/MACD + MACD S/R (Sensitive)
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -273,7 +273,7 @@ def get_boll_macd_signal(df):
         return f"⚪ {bb_status}"
 
 # ==========================================
-# 🟢 MACD Support/Resistance (کراس خط زرد و کانال)
+# 🟢 MACD Support/Resistance (نسخه حساس‌تر)
 # ==========================================
 def get_macd_sr(df):
     if len(df) < 35: return "داده کافی نیست"
@@ -300,29 +300,27 @@ def get_macd_sr(df):
     current_price = df['close'].iloc[-1]
     prev_price = df['close'].iloc[-2]
     
-    # کراس خط زرد (میانگین)
-    cross_up_avg = prev_price < avg and current_price > avg
-    cross_down_avg = prev_price > avg and current_price < avg
+    # 🟢 ۱. حساسیت به کراس: در ۲ کندل اخیر
+    recent_cross_up = (prev_price < avg and current_price > avg) or (df['close'].iloc[-3] < avg and prev_price > avg)
+    recent_cross_down = (prev_price > avg and current_price < avg) or (df['close'].iloc[-3] > avg and prev_price < avg)
     
-    # بررسی موقعیت نسبت به کانال
-    if current_price > lookback_high:
-        channel_status = "بالای کانال (شکست مقاومت)"
-    elif current_price < lookback_low:
-        channel_status = "زیر کانال (شکست حمایت)"
+    # 🟢 ۲. حساسیت به باند: در فاصله ۰.۲ درصدی
+    near_resistance = abs(current_price - lookback_high) / current_price < 0.002
+    near_support = abs(current_price - lookback_low) / current_price < 0.002
+    
+    # 🟢 ۳. تصمیم‌گیری نهایی
+    if recent_cross_up and (current_price > lookback_high or near_resistance):
+        return "🟢 Strong Long (Cross Up + Near/Break Resistance)"
+    elif recent_cross_down and (current_price < lookback_low or near_support):
+        return "🔴 Strong Short (Cross Down + Near/Break Support)"
+    elif recent_cross_up:
+        return "🟡 Weak Long (Cross Up)"
+    elif recent_cross_down:
+        return "🟠 Weak Short (Cross Down)"
     else:
-        channel_status = "داخل کانال"
-
-    # تصمیم‌گیری نهایی
-    if cross_up_avg and current_price > lookback_high:
-        return f"🟢 Long Signal: Cross Up + {channel_status}"
-    elif cross_down_avg and current_price < lookback_low:
-        return f"🔴 Short Signal: Cross Down + {channel_status}"
-    elif cross_up_avg:
-        return f"🟡 Weak Long: Cross Up but {channel_status}"
-    elif cross_down_avg:
-        return f"🟠 Weak Short: Cross Down but {channel_status}"
-    else:
-        return f"⚪ {channel_status} | Avg: {avg:.4f}"
+        if current_price > lookback_high: return "⚪ Above Channel (Breakout)"
+        elif current_price < lookback_low: return "⚪ Below Channel (Breakdown)"
+        else: return "⚪ Inside Channel"
 
 def find_pivots(df, length=PIVOT_LENGTH):
     highs = df["high"].values; lows = df["low"].values
