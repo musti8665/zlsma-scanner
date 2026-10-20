@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT + USDT.D + CCI + TTM + AO + BOLL/MACD + MACD S/R + Paper Trading (Auto-Close)
+# Ultimate Scanner: ICT + USDT.D + CCI + TTM + AO + BOLL/MACD + MACD S/R + Paper Trading
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -58,7 +58,7 @@ def log_paper_trades(new_signals):
         log = {'start_date': str(datetime.utcnow().date()), 'params': FROZEN_PARAMS, 'trades': []}
         print("📂 لاگ جدید ایجاد شد")
 
-    # 🟢 ۱. بستن معاملات باز (که زمان تایم‌فریمشان گذشته است)
+    # 🟢 ۱. بستن معاملات باز
     closed_count = 0
     for trade in log['trades']:
         if trade['status'] != 'OPEN': continue
@@ -70,7 +70,6 @@ def log_paper_trades(new_signals):
         elapsed = (datetime.utcnow() - entry_time).total_seconds()
         
         if elapsed >= tf_seconds:
-            # گرفتن قیمت فعلی
             try:
                 symbol_yf = trade['symbol'].replace("/USDT", "-USD")
                 df = yf.download(symbol_yf, period="1d", interval=tf, progress=False)
@@ -152,7 +151,7 @@ def log_paper_trades(new_signals):
     print("=" * 75 + "\n")
 
 # ==========================================
-# 🟢 توابع اصلی (بدون تغییر)
+# 🟢 توابع اصلی
 # ==========================================
 def send_telegram(msg):
     if not TG_TOKEN or not TG_CHAT:
@@ -561,4 +560,98 @@ def build_message(usdt_tfs, current_dom, ict_df, follow_ups):
             status = "✅ سود" if f["profit"] > 0 else "❌ ضرر"
             if f["TF"] == "5m": time_str = "۵ دقیقه"
             elif f["TF"] == "15m": time_str = "۱۵ دقیقه"
-            elif f["TF
+            elif f["TF"] == "1h": time_str = "۱ ساعت"
+            else: time_str = "۴ ساعت"
+            msg += (f"• <code>{f['Symbol']}</code> | {f['Signal']} | TF: {f['TF']} "
+                    f"| پس از {time_str}: {f['profit']:+.2f}% {status}\n")
+        msg += "\n"
+
+    if not ict_df.empty:
+        msg += f"💧 <b>ICT Liquidity Sweep</b> ({len(ict_df)} سیگنال)\n\n"
+        for _, r in ict_df.iterrows():
+            emo = "🟢" if r["Signal"] == "LONG" else "🔴"
+            
+            risk_warning = ""
+            if "وسط" in r['Market Structure']: risk_warning += " ⚠️(وسط)"
+            if "خلاف روند" in r['USDT.D Relation']: risk_warning += " ⚠️(خلاف روند)"
+            
+            msg += (f"{emo} <code>{r['Symbol']}</code> | TF: {r['TF']} | {r['Signal']} "
+                    f"| ⭐{r['Score']} | مرحله: {r['Stage']}{risk_warning}\n"
+                    f"   📍 ساختار: {r['Market Structure']}\n"
+                    f"   🌐 USDT.D: {r['USDT.D Trend']} ({r['USDT.D Relation']})\n"
+                    f"   📊 CCI: {r['CCI']}\n"
+                    f"   ⚡ TTM: {r['TTM']}\n"
+                    f"   📈 AO: {r['AO']}\n"
+                    f"   📉 BOLL+MACD: {r['BM']}\n"
+                    f"   📏 MACD S/R: {r['SR']}\n")
+        msg += "\n"
+
+    if ict_df.empty and not follow_ups:
+        return None
+
+    msg += "⚠️ این پیام صرفاً تحلیلی است، نه سیگنال خرید/فروش."
+    return msg
+
+def main():
+    print(f"Run: {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC\n")
+
+    usdt_tfs, current_dom = get_usdt_dominance_trend()
+
+    print("=" * 70); print("ICT Liquidity Sweep Scanner"); print("=" * 70)
+    ict_df = scan_ict(usdt_tfs)
+    if not ict_df.empty: print(ict_df.to_string(index=False))
+
+    state = load_state()
+    follow_ups = []
+    now_ts = time.time()
+    keys_to_remove = []
+
+    for key, data in state.items():
+        if key.startswith("ict_") and isinstance(data, dict) and "timestamp" in data:
+            tf = data["TF"]
+            if tf in FOLLOW_UP_TIMES:
+                elapsed = now_ts - data["timestamp"]
+                if elapsed >= FOLLOW_UP_TIMES[tf]:
+                    current_df = yf.download(data["Symbol"] + "-USD", period="7d", interval=tf, progress=False)
+                    if isinstance(current_df.columns, pd.MultiIndex): current_df.columns = current_df.columns.get_level_values(0)
+                    if not current_df.empty and len(current_df) > 0:
+                        current_df = current_df.iloc[:-1]
+                        current_price = current_df["Close"].iloc[-1]
+                        entry_price = data["Entry Price"]
+                        if data["Signal"] == "LONG": profit = (current_price - entry_price) / entry_price * 100
+                        else: profit = (entry_price - current_price) / entry_price * 100
+                        follow_ups.append({"Symbol": data["Symbol"], "TF": tf, "Signal": data["Signal"], "profit": profit})
+                    keys_to_remove.append(key)
+
+    for k in keys_to_remove: del state[k]
+
+    new_ict = []
+    for _, r in ict_df.iterrows() if not ict_df.empty else []:
+        sym = r['Symbol']; tf = r['TF']; sig_type = r['Signal'] 
+        key = f"ict_{sym}_{tf}"
+        
+        anti_spam_seconds = ANTI_SPAM_TIMES.get(tf, 15 * 60)
+        
+        is_new = False
+        if key in state and isinstance(state[key], dict):
+            last_type = state[key].get("Signal")
+            last_ts = state[key].get("timestamp", 0)
+            if sig_type != last_type or (now_ts - last_ts) >= anti_spam_seconds: is_new = True
+        else: is_new = True
+            
+        if is_new:
+            new_ict.append(r)
+            state[key] = {"Symbol": sym, "TF": tf, "Signal": sig_type, "Entry Price": r["Entry Price"], "timestamp": now_ts}
+
+    ict_new_df = pd.DataFrame(new_ict) if new_ict else pd.DataFrame()
+    save_state(state)
+
+    # 🟢 فراخوانی Paper Trading Logger
+    log_paper_trades(ict_new_df.to_dict('records') if not ict_new_df.empty else [])
+
+    msg = build_message(usdt_tfs, current_dom, ict_new_df, follow_ups)
+    if msg: print("\nTelegram sent:", send_telegram(msg))
+    else: print("\nNo alerts to send.")
+
+if __name__ == "__main__":
+    main()
