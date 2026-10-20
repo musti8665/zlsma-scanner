@@ -171,7 +171,6 @@ def detect_macd_sr(df, params, check_bars=1):
 # استراتژی ۳: ACMTS
 # ============================================================
 def get_higher_tf(tf):
-    """تبدیل تایم‌فریم فعلی به تایم‌فریم بالاتر برای ACMTS"""
     mapping = {'5m': '1h', '15m': '4h', '30m': '4h', '1h': '4h', '4h': '1d'}
     return mapping.get(tf, '4h')
 
