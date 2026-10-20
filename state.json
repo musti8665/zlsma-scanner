@@ -146,13 +146,6 @@
     "Entry Price": 4.970000190951396e-06,
     "timestamp": 1792459862.1834009
   },
-  "ict_ICP/USDT_5m": {
-    "Symbol": "ICP/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 2.827899932861328,
-    "timestamp": 1792459862.1834009
-  },
   "ict_ICP/USDT_15m": {
     "Symbol": "ICP/USDT",
     "TF": "15m",
@@ -181,13 +174,6 @@
     "Entry Price": 0.1977899968624115,
     "timestamp": 1792459862.1834009
   },
-  "ict_AVAX/USDT_5m": {
-    "Symbol": "AVAX/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 9.487000465393066,
-    "timestamp": 1792459862.1834009
-  },
   "ict_AVAX/USDT_15m": {
     "Symbol": "AVAX/USDT",
     "TF": "15m",
@@ -205,9 +191,9 @@
   "ict_NEAR/USDT_15m": {
     "Symbol": "NEAR/USDT",
     "TF": "15m",
-    "Signal": "SHORT",
-    "Entry Price": 4.825200080871582,
-    "timestamp": 1792459862.1834009
+    "Signal": "LONG",
+    "Entry Price": 4.869900226593018,
+    "timestamp": 1792460755.3131208
   },
   "ict_OP/USDT_15m": {
     "Symbol": "OP/USDT",
@@ -237,39 +223,11 @@
     "Entry Price": 0.0019128503045067191,
     "timestamp": 1792459862.1834009
   },
-  "ict_AAVE/USDT_5m": {
-    "Symbol": "AAVE/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 148.0800018310547,
-    "timestamp": 1792459862.1834009
-  },
-  "ict_DOGE/USDT_5m": {
-    "Symbol": "DOGE/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 0.07891000062227249,
-    "timestamp": 1792459862.1834009
-  },
   "ict_DOGE/USDT_15m": {
     "Symbol": "DOGE/USDT",
     "TF": "15m",
     "Signal": "LONG",
     "Entry Price": 0.07891000062227249,
-    "timestamp": 1792459862.1834009
-  },
-  "ict_HBAR/USDT_5m": {
-    "Symbol": "HBAR/USDT",
-    "TF": "5m",
-    "Signal": "SHORT",
-    "Entry Price": 0.08271999657154083,
-    "timestamp": 1792459862.1834009
-  },
-  "ict_FET/USDT_5m": {
-    "Symbol": "FET/USDT",
-    "TF": "5m",
-    "Signal": "LONG",
-    "Entry Price": 0.18849000334739685,
     "timestamp": 1792459862.1834009
   },
   "ict_FET/USDT_15m": {
@@ -285,5 +243,54 @@
     "Signal": "LONG",
     "Entry Price": 0.43077999353408813,
     "timestamp": 1792459862.1834009
+  },
+  "ict_WIF/USDT_5m": {
+    "Symbol": "WIF/USDT",
+    "TF": "5m",
+    "Signal": "LONG",
+    "Entry Price": 0.1984899938106537,
+    "timestamp": 1792460755.3131208
+  },
+  "ict_INJ/USDT_15m": {
+    "Symbol": "INJ/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 8.513999938964844,
+    "timestamp": 1792460755.3131208
+  },
+  "ict_FIL/USDT_15m": {
+    "Symbol": "FIL/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 1.0113999843597412,
+    "timestamp": 1792460755.3131208
+  },
+  "ict_THETA/USDT_15m": {
+    "Symbol": "THETA/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 0.18537230789661407,
+    "timestamp": 1792460755.3131208
+  },
+  "ict_RUNE/USDT_5m": {
+    "Symbol": "RUNE/USDT",
+    "TF": "5m",
+    "Signal": "LONG",
+    "Entry Price": 0.636798620223999,
+    "timestamp": 1792460755.3131208
+  },
+  "ict_RUNE/USDT_15m": {
+    "Symbol": "RUNE/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 0.6350399851799011,
+    "timestamp": 1792460755.3131208
+  },
+  "ict_HBAR/USDT_15m": {
+    "Symbol": "HBAR/USDT",
+    "TF": "15m",
+    "Signal": "LONG",
+    "Entry Price": 0.08288999646902084,
+    "timestamp": 1792460755.3131208
   }
 }
