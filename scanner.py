@@ -1,5 +1,5 @@
 # ============================================================
-# Ultimate Scanner: ICT + USDT.D + CCI + TTM + AO + BOLL/MACD + MACD S/R (Sensitive)
+# Ultimate Scanner: ICT + USDT.D + CCI + TTM + AO + BOLL/MACD + MACD S/R + Paper Trading
 # ============================================================
 import os, json, time, requests
 import pandas as pd
@@ -12,6 +12,13 @@ import yfinance as yf
 TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 STATE_FILE = "state.json"
+LOG_FILE = 'paper_trades_log.json'
+
+# پارامترهای ثابت Paper Trading
+FROZEN_PARAMS = {
+    'swing_length': 5, 'lookback': 60, 'sl_rr': 1.5,
+    'max_bars': 20, 'risk_pct': 0.02,
+}
 
 ICT_SYMBOLS = [
     "SHIB-USD","ICP-USD","SEI-USD","NOT-USD","WIF-USD","AVAX-USD",
@@ -33,6 +40,89 @@ FOLLOW_UP_TIMES = {
     "5m": 5 * 60, "15m": 15 * 60, "1h": 60 * 60, "4h": 4 * 60 * 60
 }
 
+# ==========================================
+# 🟢 Paper Trading Logger
+# ==========================================
+def log_paper_trades(new_signals):
+    print("\n" + "=" * 75)
+    print(f"📝 Paper Trading Scan — {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
+    print("=" * 75)
+
+    if os.path.exists(LOG_FILE):
+        try:
+            with open(LOG_FILE, 'r') as f:
+                log = json.load(f)
+            print(f"📂 لاگ موجود: {len(log['trades'])} معامله ثبت‌شده")
+        except:
+            log = {'start_date': str(datetime.utcnow().date()), 'params': FROZEN_PARAMS, 'trades': []}
+    else:
+        log = {'start_date': str(datetime.utcnow().date()), 'params': FROZEN_PARAMS, 'trades': []}
+        print("📂 لاگ جدید ایجاد شد")
+
+    added_count = 0
+    for sig in new_signals:
+        # جلوگیری از ثبت تکراری بر اساس نماد + تایم‌فریم + جهت
+        key = f"{sig['Symbol']}_{sig['TF']}_{sig['Signal']}"
+        if any(t.get('key') == key for t in log['trades']):
+            continue
+
+        # شبیه‌سازی یک معامله باز (چون در سیستم ما حد ضرر و تارگت نداریم)
+        trade = {
+            'key': key,
+            'symbol': sig['Symbol'],
+            'side': sig['Signal'],
+            'tf': sig['TF'],
+            'entry_time': str(datetime.utcnow()),
+            'entry_price': sig['Entry Price'],
+            'exit_price': None,
+            'pnl_pct': 0.0, # فعلاً باز است
+            'status': 'OPEN',
+            'reason': 'Live Signal',
+            'logged_at': str(datetime.utcnow()),
+        }
+        log['trades'].append(trade)
+        added_count += 1
+        emoji = '🟢' if sig['Signal'] == 'LONG' else '🔴'
+        print(f"  {emoji} {sig['Symbol']:12s} | {sig['Signal']:5s} | TF: {sig['TF']} | Entry: {sig['Entry Price']:.4f}")
+
+    if added_count > 0:
+        with open(LOG_FILE, 'w') as f:
+            json.dump(log, f, indent=2, default=str)
+        print(f"\n✅ {added_count} سیگنال جدید در لاگ ثبت شد")
+    else:
+        print("\n· سیگنال جدیدی برای ثبت نبود")
+
+    # گزارش تجمعی
+    print("\n" + "=" * 75)
+    print("📊 گزارش تجمعی Paper Trading")
+    print("=" * 75)
+
+    if log['trades']:
+        df_log = pd.DataFrame(log['trades'])
+        closed = df_log[df_log['status'] == 'CLOSED']
+        open_t = df_log[df_log['status'] == 'OPEN']
+
+        days_running = (datetime.utcnow() - datetime.fromisoformat(log['start_date']).replace(tzinfo=None)).days
+        print(f"  شروع: {log['start_date']} ({days_running} روز پیش)")
+        print(f"  کل سیگنال‌ها: {len(df_log)} | باز: {len(open_t)} | بسته: {len(closed)}")
+
+        if len(closed) >= 5:
+            wins = closed[closed['pnl_pct'] > 0]
+            losses = closed[closed['pnl_pct'] <= 0]
+            pf_live = wins['pnl_pct'].sum() / abs(losses['pnl_pct'].sum()) if len(losses) else 999
+            wr_live = len(wins)/len(closed)*100
+            print(f"  WR زنده: {wr_live:.1f}%")
+            print(f"  PF زنده: {pf_live:.2f}")
+            print(f"  بازده تجمعی: {closed['pnl_pct'].sum():+.2f}%")
+        else:
+            print("  ⏳ هنوز به ۵ معامله بسته نرسیده‌ایم")
+    else:
+        print("  هنوز سیگنالی ثبت نشده")
+    print("=" * 75 + "\n")
+
+# ==========================================
+# 🟢 توابع اصلی اسکنر
+# ==========================================
 def send_telegram(msg):
     if not TG_TOKEN or not TG_CHAT:
         print("Telegram not configured"); return False
@@ -272,9 +362,6 @@ def get_boll_macd_signal(df):
     else:
         return f"⚪ {bb_status}"
 
-# ==========================================
-# 🟢 MACD Support/Resistance (نسخه حساس‌تر)
-# ==========================================
 def get_macd_sr(df):
     if len(df) < 35: return "داده کافی نیست"
     
@@ -289,26 +376,21 @@ def get_macd_sr(df):
     cross_under = (macd_line.iloc[-2] >= signal_line.iloc[-2]) and (macd_line.iloc[-1] < signal_line.iloc[-1])
     cross_over = (macd_line.iloc[-2] <= signal_line.iloc[-2]) and (macd_line.iloc[-1] > signal_line.iloc[-1])
     
-    lookback = 11
+    lookback = 5
     lookback_high = ha_high.rolling(lookback).max().iloc[-1]
     lookback_low = ha_low.rolling(lookback).min().iloc[-1]
     
-    # میانگین (خط زرد)
     avg = (lookback_high + lookback_low) / 2
     
-    # قیمت فعلی
     current_price = df['close'].iloc[-1]
     prev_price = df['close'].iloc[-2]
     
-    # 🟢 ۱. حساسیت به کراس: در ۲ کندل اخیر
     recent_cross_up = (prev_price < avg and current_price > avg) or (df['close'].iloc[-3] < avg and prev_price > avg)
     recent_cross_down = (prev_price > avg and current_price < avg) or (df['close'].iloc[-3] > avg and prev_price < avg)
     
-    # 🟢 ۲. حساسیت به باند: در فاصله ۰.۲ درصدی
     near_resistance = abs(current_price - lookback_high) / current_price < 0.002
     near_support = abs(current_price - lookback_low) / current_price < 0.002
     
-    # 🟢 ۳. تصمیم‌گیری نهایی
     if recent_cross_up and (current_price > lookback_high or near_resistance):
         return "🟢 Strong Long (Cross Up + Near/Break Resistance)"
     elif recent_cross_down and (current_price < lookback_low or near_support):
@@ -533,6 +615,10 @@ def main():
 
     ict_new_df = pd.DataFrame(new_ict) if new_ict else pd.DataFrame()
     save_state(state)
+
+    # 🟢 اضافه شدن بخش Paper Trading Logger
+    if not ict_new_df.empty:
+        log_paper_trades(ict_new_df.to_dict('records'))
 
     msg = build_message(usdt_tfs, current_dom, ict_new_df, follow_ups)
     if msg: print("\nTelegram sent:", send_telegram(msg))
