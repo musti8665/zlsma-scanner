@@ -39,14 +39,11 @@ HEADERS = {"X-API-Key": API_KEY}
 H_JSON = {**HEADERS, "Content-Type": "application/json"}
 
 # ============================================================
-# لیست ۲۵ ارز (فرمت MarginPad)
+# لیست ارزهای پشتیبانی شده توسط MarginPad
 # ============================================================
 SYMBOLS = [
-    "SHIB", "ICP", "SEI", "NOT", "WIF", "AVAX",
-    "WLD", "ADA", "NEAR", "OP", "BONK",
-    "SOL", "INJ", "FIL", "ARB", "GALA", "AAVE",
-    "THETA", "RUNE", "DOGE", "HBAR",
-    "HYPE", "ALGO", "FET", "ONDO",
+    "BTC", "ETH", "SOL", "AVAX", "DOGE", "SHIB",
+    "WIF", "LINK", "AAVE", "ARB", "INJ", "FET",
 ]
 
 PARAMS = {
@@ -114,8 +111,8 @@ def format_time_exit_message(sym, hours):
 # MARGINPAD API
 # ============================================================
 def get_klines(symbol, interval):
-    # تبدیل فرمت تایم‌فریم به فرمت مورد نیاز MarginPad
-    interval_map = {"60": "1h", "240": "4h"}
+    # MarginPad از دقیقه استفاده می‌کند: 60 برای 1h و 240 برای 4h
+    interval_map = {"60": "60", "240": "240"}
     api_interval = interval_map.get(str(interval), str(interval))
     
     r = requests.get(f"{BASE}/klines?symbol={symbol}&interval={api_interval}", timeout=15)
@@ -292,8 +289,8 @@ def run_scan() -> int:
 
     for sym in SYMBOLS:
         try:
-            k1h = get_klines(sym, "1h")
-            k4h = get_klines(sym, "4h")
+            k1h = get_klines(sym, "60")
+            k4h = get_klines(sym, "240")
             df_1h = klines_to_df(k1h[-300:])
             df_4h = klines_to_df(k4h[-200:])
         except Exception as e:
