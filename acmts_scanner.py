@@ -3,7 +3,6 @@
 """
 ACMTS × MarginPad × Telegram — Final Production Scanner
 ========================================================
-Strategy: Adaptive Context Multi-Timeframe Strategy
 """
 
 import os
@@ -18,16 +17,8 @@ from pathlib import Path
 # ============================================================
 # CONFIG
 # ============================================================
-API_KEY = os.environ.get(
-    "MARGINPAD_API_KEY",
-    "mpb_d04c938486b9f5e711f9a736084fa9b5",
-).strip()
-
-TG_TOKEN = os.environ.get(
-    "TELEGRAM_TOKEN",
-    "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo",
-).strip()
-
+API_KEY = os.environ.get("MARGINPAD_API_KEY", "mpb_d04c938486b9f5e711f9a736084fa9b5").strip()
+TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo").strip()
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 if not API_KEY:
@@ -38,12 +29,13 @@ BASE = "https://marginpad.io/api/bot/v1"
 HEADERS = {"X-API-Key": API_KEY}
 H_JSON = {**HEADERS, "Content-Type": "application/json"}
 
-# ============================================================
-# لیست ارزهای پشتیبانی شده توسط MarginPad
-# ============================================================
+# لیست ۲۵ ارز (فرمت MarginPad)
 SYMBOLS = [
-    "BTC", "ETH", "SOL", "AVAX", "DOGE", "SHIB",
-    "WIF", "LINK", "AAVE", "ARB", "INJ", "FET",
+    "SHIB", "ICP", "SEI", "NOT", "WIF", "AVAX",
+    "WLD", "ADA", "NEAR", "OP", "BONK",
+    "SOL", "INJ", "FIL", "ARB", "GALA", "AAVE",
+    "THETA", "RUNE", "DOGE", "HBAR",
+    "HYPE", "ALGO", "FET", "ONDO",
 ]
 
 PARAMS = {
@@ -111,7 +103,7 @@ def format_time_exit_message(sym, hours):
 # MARGINPAD API
 # ============================================================
 def get_klines(symbol, interval):
-    # MarginPad از دقیقه استفاده می‌کند: 60 برای 1h و 240 برای 4h
+    # تبدیل فرمت تایم‌فریم به فرمت مورد نیاز MarginPad
     interval_map = {"60": "60", "240": "240"}
     api_interval = interval_map.get(str(interval), str(interval))
     
@@ -137,6 +129,11 @@ def open_position(symbol, side, margin, leverage, sl, tp, coid):
         "client_order_id": coid,
     }
     r = requests.post(f"{BASE}/open", headers=H_JSON, json=body, timeout=15)
+    
+    # 🟢 این بخش جدید اضافه شده تا دقیقاً خطای سرور را ببینیم
+    if r.status_code != 200:
+        print(f"  [{symbol}] SERVER ERROR ({r.status_code}): {r.text}")
+    
     r.raise_for_status()
     return r.json()
 
