@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 MarginPad Multi-Strategy Scanner: ACMTS + ParkF (LONG/SHORT)
-Includes per-strategy performance reporting in Telegram.
+Includes detailed Telegram reporting for new trades, closed trades, and strategy stats.
 """
 
 import os
@@ -29,7 +29,7 @@ BASE = "https://marginpad.io/api/bot/v1"
 HEADERS = {"X-API-Key": API_KEY}
 H_JSON = {**HEADERS, "Content-Type": "application/json"}
 
-# ✅ ۳۰ ارز پشتیبانی‌شده
+# ✅ ۳۰ ارز پشتیبانی‌شده توسط MarginPad
 SYMBOLS = [
     "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "LTC",
     "ENA", "TRX", "DOT", "ATOM", "NEAR", "ARB", "OP", "PEPE", "SHIB", "SUI",
@@ -69,37 +69,54 @@ def send_telegram(text: str) -> bool:
         print(f"  [telegram] error: {e}")
         return False
 
-def format_signal_message(sym, sig, margin):
+def format_new_trade(sym, sig, margin, balance):
     emoji = "🟢" if sig["side"] == "LONG" else "🔴"
     return (
-        f"{emoji} <b>{sym} {sig['side']}</b> ({sig['strategy']})\n"
-        f"📊 TF: <b>{sig['tf']}</b>\n"
-        f"📍 Entry: <code>{sig['entry']:.6f}</code>\n"
-        f"🛑 SL: <code>{sig['sl']:.6f}</code> (-{sig['sl_pct']:.2f}%)\n"
-        f"🎯 TP: <code>{sig['tp']:.6f}</code> (+{sig['tp_pct']:.2f}%)\n"
-        f"💰 Margin: <b>${margin:.2f}</b> @ {LEVERAGE}×\n"
+        f"{emoji} <b>معامله جدید: {sym} {sig['side']}</b>\n"
+        f"🧠 استراتژی: <b>{sig['strategy']}</b>\n"
+        f"📊 تایم‌فریم: <b>1h</b>\n\n"
+        f"📍 قیمت ورود: <code>{sig['entry']:.6f}</code>\n"
+        f"🛑 حد ضرر: <code>{sig['sl']:.6f}</code> (-{sig['sl_pct']:.2f}%)\n"
+        f"🎯 حد سود: <code>{sig['tp']:.6f}</code> (+{sig['tp_pct']:.2f}%)\n"
+        f"💰 مارجین: <b>${margin:.2f}</b> (اهرم {LEVERAGE}×)\n"
+        f"🏦 موجودی کل: ${balance:,.2f}\n"
     )
 
-def format_performance_summary(log_data):
+def format_closed_trade(trade):
+    emoji = "✅" if trade["pnl_pct"] > 0 else "❌"
+    return (
+        f"{emoji} <b>معامله بسته شد: {trade['symbol']} {trade['side']}</b>\n"
+        f"🧠 استراتژی: <b>{trade['strategy']}</b>\n\n"
+        f"📍 قیمت ورود: <code>{trade['entry']:.6f}</code>\n"
+        f"🏁 قیمت خروج: <code>{trade['exit']:.6f}</code>\n"
+        f"📊 سود/ضرر: <b>{trade['pnl_pct']:+.2f}%</b>\n"
+    )
+
+def format_strategy_summary(log_data):
     closed = log_data.get("closed_trades", [])
-    if not closed: return "هنوز معامله بسته‌شده‌ای نداریم."
+    if not closed: return "<i>هنوز معامله بسته‌شده‌ای ثبت نشده است.</i>"
 
     df = pd.DataFrame(closed)
-    report = "<b>📈 گزارش بازدهی استراتژی‌ها:</b>\n\n"
+    report = "📈 <b>گزارش بازدهی استراتژی‌ها:</b>\n\n"
     
     for strat in ["ACMTS", "ParkF"]:
         strat_df = df[df["strategy"] == strat]
-        if strat_df.empty: continue
+        if strat_df.empty: 
+            report += f"<b>🔹 {strat}</b>: هنوز معامله‌ای ندارد.\n\n"
+            continue
         
-        total_trades = len(strat_df)
+        total = len(strat_df)
         wins = len(strat_df[strat_df["pnl_pct"] > 0])
-        win_rate = (wins / total_trades) * 100
+        losses = total - wins
+        wr = (wins / total) * 100
         total_pnl = strat_df["pnl_pct"].sum()
+        avg_pnl = total_pnl / total
         
         report += f"<b>🔹 {strat}</b>\n"
-        report += f"• تعداد معاملات: {total_trades}\n"
-        report += f"• وین ریت: {win_rate:.1f}%\n"
-        report += f"• سود/زیان کل: {total_pnl:+.2f}%\n\n"
+        report += f"• کل معاملات: {total} (✅{wins} / ❌{losses})\n"
+        report += f"• وین‌ریت: {wr:.1f}%\n"
+        report += f"• سود/زیان کل: <b>{total_pnl:+.2f}%</b>\n"
+        report += f"• میانگین هر معامله: {avg_pnl:+.2f}%\n\n"
         
     return report
 
@@ -124,11 +141,6 @@ def get_balance():
 def open_position(symbol, side, margin, leverage, sl, tp, coid):
     body = {"symbol": symbol, "side": side, "margin_usd": round(margin, 2), "leverage": leverage, "sl": sl, "tp": tp, "client_order_id": coid}
     r = requests.post(f"{BASE}/open", headers=H_JSON, json=body, timeout=15)
-    r.raise_for_status()
-    return r.json()
-
-def close_position(pos_id, symbol):
-    r = requests.post(f"{BASE}/close", headers=H_JSON, json={"id": pos_id, "symbol": symbol}, timeout=15)
     r.raise_for_status()
     return r.json()
 
@@ -171,7 +183,6 @@ def detect_acmts(df_1h, df_4h):
     close, high, low = df_1h["close"].values, df_1h["high"].values, df_1h["low"].values
     atr = compute_atr(df_1h)
 
-    # Regime
     h4, l4 = df_4h["high"].values, df_4h["low"].values
     dc_h4 = pd.Series(h4).rolling(P["dc_4h_period"]).max().values
     dc_l4 = pd.Series(l4).rolling(P["dc_4h_period"]).min().values
@@ -198,7 +209,6 @@ def detect_acmts(df_1h, df_4h):
     sl_dist = P["sl_atr_mult"] * float(atr[i])
     if sl_dist <= 0: return None
 
-    # TREND
     if regime[i] == 1:
         if prev[i] <= dc_h1[i] and close[i] > dc_h1[i]:
             entry, sl, tp = float(close[i]), float(close[i]) - sl_dist, float(close[i]) + P["tp_rr_trend"] * sl_dist
@@ -206,7 +216,6 @@ def detect_acmts(df_1h, df_4h):
         if prev[i] >= dc_l1[i] and close[i] < dc_l1[i]:
             entry, sl, tp = float(close[i]), float(close[i]) + sl_dist, float(close[i]) - P["tp_rr_trend"] * sl_dist
             if 0 < (sl - entry) / entry < 0.15 and tp < entry: return {"strategy": "ACMTS", "side": "SHORT", "entry": entry, "sl": sl, "tp": tp, "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100}
-    # RANGE
     elif regime[i] == -1:
         if low[i] <= bb_l[i] and close[i] > bb_l[i] and bb_mid[i] > close[i]:
             entry, sl, tp = float(close[i]), float(close[i]) - sl_dist, float(bb_mid[i])
@@ -226,7 +235,6 @@ def detect_parkf(df):
     close, high, low = df["close"].values, df["high"].values, df["low"].values
     atr = compute_atr(df)
 
-    # Linear Regression Bands
     shape = (n - P["length"] + 1, P["length"])
     strides = (close.strides[0], close.strides[0])
     y_win = np.lib.stride_tricks.as_strided(close, shape=shape, strides=strides)
@@ -288,11 +296,11 @@ def run_scan() -> int:
         print(f"FATAL positions: {e}"); return 1
 
     # Detect server-side closes & Calculate PnL
+    newly_closed = []
     for sym in list(log["open_entries"].keys()):
         if sym not in open_positions:
             entry_info = log["open_entries"].pop(sym)
             try:
-                # Fetch current price to estimate PnL
                 k = get_klines(sym, "60")
                 current_price = float(k[-1]["close"])
                 entry_price = entry_info["entry"]
@@ -301,10 +309,12 @@ def run_scan() -> int:
                 if side == "LONG": pnl = (current_price - entry_price) / entry_price * 100
                 else: pnl = (entry_price - current_price) / entry_price * 100
                 
-                log["closed_trades"].append({
+                closed_record = {
                     "symbol": sym, "strategy": entry_info["strategy"], "side": side,
                     "entry": entry_price, "exit": current_price, "pnl_pct": round(pnl, 2)
-                })
+                }
+                log["closed_trades"].append(closed_record)
+                newly_closed.append(closed_record)
                 print(f"  [CLOSED] {sym} ({entry_info['strategy']}) -> PnL: {pnl:+.2f}%")
             except Exception as e:
                 print(f"  [{sym}] close calc error: {e}")
@@ -312,18 +322,17 @@ def run_scan() -> int:
     new_trades = []
 
     for sym in SYMBOLS:
-        # Skip if already open
         if sym in open_positions: continue
 
         try:
             k1h = get_klines(sym, "60")
             df_1h = klines_to_df(k1h[-300:])
-        except Exception as e:
+        except Exception:
             continue
 
         signals = []
 
-        # Check ACMTS (needs 4h)
+        # Check ACMTS
         try:
             k4h = get_klines(sym, "240")
             df_4h = klines_to_df(k4h[-200:])
@@ -337,9 +346,8 @@ def run_scan() -> int:
             if s: signals.append(s)
         except Exception: pass
 
-        # Execute (Prioritize ACMTS if both fire)
         if signals:
-            sig = signals[0] # Takes the first signal (ACMTS is checked first)
+            sig = signals[0]
             
             risk_amount = balance_usd * RISK_PCT_PER_TRADE
             sl_frac = sig["sl_pct"] / 100.0
@@ -355,7 +363,6 @@ def run_scan() -> int:
 
             if resp.get("idempotent"): continue
 
-            # Save to log
             log["open_entries"][sym] = {
                 "strategy": sig["strategy"], "side": sig["side"], "entry": sig["entry"],
                 "sl": sig["sl"], "tp": sig["tp"], "margin": margin
@@ -367,24 +374,34 @@ def run_scan() -> int:
 
     save_log(log)
 
-    # Telegram Report
+    # ==========================================
+    # Build Telegram Report
+    # ==========================================
     msg_blocks = []
     
+    # 1. New Trades
     if new_trades:
-        msg_blocks.append(f"<b>🎯 معاملات جدید — {now.strftime('%Y-%m-%d %H:%M')} UTC</b>\n" + "─" * 28)
+        msg_blocks.append(f"<b>🔔 معاملات جدید — {now.strftime('%H:%M')} UTC</b>")
         for sym, sig, margin in new_trades:
-            sig['tf'] = "1h"
-            msg_blocks.append(format_signal_message(sym, sig, margin))
-    
-    perf_summary = format_performance_summary(log)
-    if perf_summary:
-        msg_blocks.append(perf_summary)
+            msg_blocks.append(format_new_trade(sym, sig, margin, balance_usd))
+            
+    # 2. Newly Closed Trades
+    if newly_closed:
+        msg_blocks.append(f"<b>🔒 معاملات بسته‌شده — {now.strftime('%H:%M')} UTC</b>")
+        for t in newly_closed:
+            msg_blocks.append(format_closed_trade(t))
+            
+    # 3. Performance Summary
+    msg_blocks.append(format_strategy_summary(log))
         
-    if msg_blocks:
-        if send_telegram("\n\n".join(msg_blocks)):
+    if msg_blocks and (new_trades or newly_closed):
+        # فقط وقتی پیام میدهیم که معامله جدیدی باز یا بسته شده باشد
+        # (اگر فقط گزارش آمار باشد و معامله‌ای نشده باشد، برای جلوگیری از اسپم پیام نمیدهیم)
+        final_msg = "\n\n".join(msg_blocks)
+        if send_telegram(final_msg):
             print(f"  [telegram] sent")
 
-    print(f"\nResult: {len(new_trades)} new trades opened")
+    print(f"\nResult: {len(new_trades)} new | {len(newly_closed)} closed")
     print("=" * 70)
     return 0
 
