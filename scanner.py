@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Multi-Timeframe Multi-Strategy Scanner: ParkF + MACD-SR + ACMTS
-Scans 25 symbols across 5m, 15m, 30m, 1h, 4h
+Multi-Timeframe Multi-Strategy Scanner: ParkF + ACMTS
+Scans 25 symbols across multiple timeframes (5m, 15m, 30m, 1h, 4h)
 """
 
 import os
@@ -23,7 +23,6 @@ warnings.filterwarnings('ignore')
 # ============================================================
 # CONFIG
 # ============================================================
-# تایم‌فریم‌هایی که باید اسکن شوند
 TIMEFRAMES = ['5m', '15m', '30m', '1h', '4h']
 LIMIT = 500
 CHECK_BARS = 1
@@ -34,7 +33,7 @@ TG_CHAT  = os.getenv('TELEGRAM_CHAT_ID', '').strip()
 EXCHANGES = ['kucoin', 'okx', 'binance', 'bybit']
 
 # ============================================================
-# لیست ۲۵ نماد (فرمت ccxt)
+# لیست ۲۵ نماد شما (تبدیل شده به فرمت ccxt)
 # ============================================================
 SYMBOLS = [
     "SHIB/USDT", "ICP/USDT", "SEI/USDT", "NOT/USDT", "WIF/USDT",
@@ -45,10 +44,11 @@ SYMBOLS = [
 ]
 
 # ============================================================
-# پارامترهای تایید شده
+# پارامترهای تایید شده (بدون MACD-SR)
 # ============================================================
-PARKF_PARAMS = {'length': 50, 'sigma': 1.0, 'sl_atr_mult': 2.0, 'max_bars': 50}
-MACD_SR_PARAMS = {'lookback': 2, 'sl_atr': 2.75, 'tp_rr': 1.25, 'max_bars': 18}
+PARKF_PARAMS = {
+    'length': 50, 'sigma': 1.0, 'sl_atr_mult': 2.0, 'max_bars': 50,
+}
 ACMTS_PARAMS = {
     'dc_4h_period': 15, 'width_lookback': 100,
     'trend_threshold': 1.8, 'range_threshold': 0.6,
@@ -140,35 +140,7 @@ def detect_parkf(df, params, check_bars=1):
     return None
 
 # ============================================================
-# استراتژی ۲: MACD-SR
-# ============================================================
-def detect_macd_sr(df, params, check_bars=1):
-    n = len(df)
-    if n < params['lookback'] + 30: return None
-    close, high, low = df['close'].values, df['high'].values, df['low'].values
-    ema12 = pd.Series(close).ewm(span=12, adjust=False).mean().values
-    ema26 = pd.Series(close).ewm(span=26, adjust=False).mean().values
-    macd = ema12 - ema26
-    sig = pd.Series(macd).ewm(span=9, adjust=False).mean().values
-    lb = params['lookback']
-    avg = (pd.Series(high).rolling(lb).max().values + pd.Series(low).rolling(lb).min().values) / 2
-    atr = compute_atr(df)
-    end_bar = n - 1
-    start_bar = max(lb + 1, end_bar - check_bars + 1)
-    for t in range(end_bar, start_bar - 1, -1):
-        if np.isnan(avg[t]) or np.isnan(avg[t-1]) or np.isnan(atr[t]): continue
-        if close[t-1] < avg[t-1] and close[t] > avg[t] and macd[t] > sig[t]:
-            entry, sl, tp = close[t], close[t] - params['sl_atr'] * atr[t], close[t] + params['tp_rr'] * (close[t] - (close[t] - params['sl_atr'] * atr[t]))
-            if 0 < (entry - sl) / entry < 0.15:
-                return {'strategy': 'MACD-SR', 'side': 'LONG', 'regime': 'TREND', 'entry_price': round(entry, 8), 'sl_price': round(sl, 8), 'tp_price': round(tp, 8), 'sl_pct': round((entry - sl) / entry * 100, 2), 'tp_pct': round((tp - entry) / entry * 100, 2), 'bars_ago': n - 1 - t, 'reason': 'Cross above mid + MACD bullish'}
-        if close[t-1] > avg[t-1] and close[t] < avg[t] and macd[t] < sig[t]:
-            entry, sl, tp = close[t], close[t] + params['sl_atr'] * atr[t], close[t] - params['tp_rr'] * ((close[t] + params['sl_atr'] * atr[t]) - close[t])
-            if 0 < (sl - entry) / entry < 0.15:
-                return {'strategy': 'MACD-SR', 'side': 'SHORT', 'regime': 'TREND', 'entry_price': round(entry, 8), 'sl_price': round(sl, 8), 'tp_price': round(tp, 8), 'sl_pct': round((sl - entry) / entry * 100, 2), 'tp_pct': round((entry - tp) / entry * 100, 2), 'bars_ago': n - 1 - t, 'reason': 'Cross below mid + MACD bearish'}
-    return None
-
-# ============================================================
-# استراتژی ۳: ACMTS
+# استراتژی ۲: ACMTS
 # ============================================================
 def get_higher_tf(tf):
     mapping = {'5m': '1h', '15m': '4h', '30m': '4h', '1h': '4h', '4h': '1d'}
@@ -259,7 +231,7 @@ def main():
     print("=" * 85)
     print(f"🎯 Multi-TF Multi-Strategy Scanner | {now}")
     print(f"Timeframes: {', '.join(TIMEFRAMES)}")
-    print(f"Strategies: ParkF + MACD-SR + ACMTS")
+    print(f"Strategies: ParkF + ACMTS")
     print(f"Symbols: {len(SYMBOLS)}")
     print("=" * 85)
 
@@ -289,17 +261,7 @@ def main():
                     print(f"{tag} {'🟢' if sig['side'] == 'LONG' else '🔴'} ParkF {sig['side']:5s} | Entry={sig['entry_price']:.6g}")
             except Exception: pass
 
-            # 2. MACD-SR
-            if not found:
-                try:
-                    sig = detect_macd_sr(df_1h, MACD_SR_PARAMS, CHECK_BARS)
-                    if sig:
-                        sig['symbol'] = symbol; sig['timeframe'] = tf
-                        all_signals.append(sig); found = True
-                        print(f"{tag} {'🟢' if sig['side'] == 'LONG' else '🔴'} MACD-SR {sig['side']:5s} | Entry={sig['entry_price']:.6g}")
-                except Exception: pass
-
-            # 3. ACMTS
+            # 2. ACMTS
             if not found and df_htf is not None:
                 try:
                     sig = detect_acmts(df_1h, df_htf, ACMTS_PARAMS, CHECK_BARS)
