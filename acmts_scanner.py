@@ -4,8 +4,6 @@
 ACMTS × MarginPad × Telegram — Final Production Scanner
 ========================================================
 Strategy: Adaptive Context Multi-Timeframe Strategy
-Validated: Sharpe 2.10 (2yr), 2.12 (symbol holdout)
-Runs every 15 min via cron-job.org with automatic idempotent dedup.
 """
 
 import os
@@ -17,24 +15,19 @@ import pandas as pd
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 # ============================================================
-# CONFIG  (env vars override the defaults below)
+# CONFIG
 # ============================================================
-
-# MarginPad API key — defaults to your key
 API_KEY = os.environ.get(
     "MARGINPAD_API_KEY",
     "mpb_d04c938486b9f5e711f9a736084fa9b5",
 ).strip()
 
-# Telegram bot token — defaults to your bot
 TG_TOKEN = os.environ.get(
     "TELEGRAM_TOKEN",
     "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo",
 ).strip()
 
-# Telegram chat ID — MUST be set (no safe default)
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 if not API_KEY:
@@ -45,9 +38,15 @@ BASE = "https://marginpad.io/api/bot/v1"
 HEADERS = {"X-API-Key": API_KEY}
 H_JSON = {**HEADERS, "Content-Type": "application/json"}
 
+# ============================================================
+# لیست ۲۵ ارز (فرمت MarginPad)
+# ============================================================
 SYMBOLS = [
-    "BTC", "ETH", "SOL", "AVAX", "DOGE", "SHIB",
-    "WIF", "LINK", "AAVE", "ARB", "INJ", "FET",
+    "SHIB", "ICP", "SEI", "NOT", "WIF", "AVAX",
+    "WLD", "ADA", "NEAR", "OP", "BONK",
+    "SOL", "INJ", "FIL", "ARB", "GALA", "AAVE",
+    "THETA", "RUNE", "DOGE", "HBAR",
+    "HYPE", "ALGO", "FET", "ONDO",
 ]
 
 PARAMS = {
@@ -68,11 +67,9 @@ LEVERAGE = 10
 MAX_MARGIN_PCT = 0.15
 LOG_FILE = Path("/tmp/acmts_paper_log.json")
 
-
 # ============================================================
 # TELEGRAM
 # ============================================================
-
 def send_telegram(text: str) -> bool:
     if not TG_TOKEN or not TG_CHAT:
         print("  [telegram] skipped — TELEGRAM_CHAT_ID not set")
@@ -96,7 +93,6 @@ def send_telegram(text: str) -> bool:
         print(f"  [telegram] error: {e}")
         return False
 
-
 def format_signal_message(sym, sig, margin):
     return (
         f"🟢 <b>{sym} LONG</b>\n\n"
@@ -108,35 +104,33 @@ def format_signal_message(sym, sig, margin):
         f"🕒 {sig['bar_time'][:16]}"
     )
 
-
 def format_time_exit_message(sym, hours):
     return (
         f"⏰ <b>{sym} CLOSED</b> (time exit)\n"
         f"Held: {hours:.0f}h (max {PARAMS['max_bars']}h)"
     )
 
-
 # ============================================================
 # MARGINPAD API
 # ============================================================
-
 def get_klines(symbol, interval):
-    r = requests.get(f"{BASE}/klines?symbol={symbol}&interval={interval}", timeout=15)
+    # تبدیل فرمت تایم‌فریم به فرمت مورد نیاز MarginPad
+    interval_map = {"60": "1h", "240": "4h"}
+    api_interval = interval_map.get(str(interval), str(interval))
+    
+    r = requests.get(f"{BASE}/klines?symbol={symbol}&interval={api_interval}", timeout=15)
     r.raise_for_status()
     return r.json()
-
 
 def get_positions():
     r = requests.get(f"{BASE}/positions?status=open", headers=HEADERS, timeout=15)
     r.raise_for_status()
     return {p["symbol"]: p for p in r.json().get("positions", [])}
 
-
 def get_balance():
     r = requests.get(f"{BASE}/balance", headers=HEADERS, timeout=15)
     r.raise_for_status()
     return r.json()
-
 
 def open_position(symbol, side, margin, leverage, sl, tp, coid):
     body = {
@@ -149,7 +143,6 @@ def open_position(symbol, side, margin, leverage, sl, tp, coid):
     r.raise_for_status()
     return r.json()
 
-
 def close_position(pos_id, symbol):
     r = requests.post(
         f"{BASE}/close", headers=H_JSON,
@@ -158,11 +151,9 @@ def close_position(pos_id, symbol):
     r.raise_for_status()
     return r.json()
 
-
 # ============================================================
 # LOG
 # ============================================================
-
 def load_log():
     if LOG_FILE.exists():
         try:
@@ -171,15 +162,12 @@ def load_log():
             pass
     return {"entries": {}, "history": []}
 
-
 def save_log(log):
     LOG_FILE.write_text(json.dumps(log, indent=2, default=str))
-
 
 # ============================================================
 # INDICATORS
 # ============================================================
-
 def compute_atr(df, length=14):
     h, l, c = df["high"].values, df["low"].values, df["close"].values
     tr = np.maximum(h - l, np.maximum(np.abs(h - np.roll(c, 1)),
@@ -187,17 +175,14 @@ def compute_atr(df, length=14):
     tr[0] = h[0] - l[0]
     return pd.Series(tr).ewm(alpha=1/length, adjust=False).mean().values
 
-
 def klines_to_df(klines):
     df = pd.DataFrame(klines)
     df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
     return df.set_index("time").sort_index()
 
-
 # ============================================================
-# ACMTS SIGNAL — last CLOSED 1h bar (index n-2)
+# ACMTS SIGNAL
 # ============================================================
-
 def acmts_signal(df_1h, df_4h):
     n = len(df_1h)
     if n < PARAMS["dc_1h_period"] + 20:
@@ -267,11 +252,9 @@ def acmts_signal(df_1h, df_4h):
         "regime": "trend" if trend_long else "range",
     }
 
-
 # ============================================================
 # MAIN SCAN
 # ============================================================
-
 def run_scan() -> int:
     now = datetime.now(timezone.utc)
     print("=" * 70)
@@ -309,8 +292,8 @@ def run_scan() -> int:
 
     for sym in SYMBOLS:
         try:
-            k1h = get_klines(sym, 60)
-            k4h = get_klines(sym, 240)
+            k1h = get_klines(sym, "1h")
+            k4h = get_klines(sym, "4h")
             df_1h = klines_to_df(k1h[-300:])
             df_4h = klines_to_df(k4h[-200:])
         except Exception as e:
@@ -345,7 +328,7 @@ def run_scan() -> int:
         margin = min(notional / LEVERAGE, balance_usd * MAX_MARGIN_PCT)
         margin = max(margin, 1.0)
 
-        # Idempotent client_order_id — same bar = same id = MarginPad dedups
+        # Idempotent client_order_id
         coid = f"acmts-{sym}-{sig['bar_ts']}"
 
         try:
@@ -399,7 +382,6 @@ def run_scan() -> int:
           f"{len(open_positions) + len(new_trades) - len(time_exits)} open")
     print("=" * 70)
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(run_scan())
