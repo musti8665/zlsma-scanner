@@ -36,14 +36,14 @@ SYMBOLS = [
     "APT", "INJ", "TIA", "SEI", "WIF", "LDO", "UNI", "AAVE", "FIL", "RENDER",
 ]
 
-# --- پارامترهای استراتژی ACMTS ---
+# --- پارامترهای استراتژی ACMTS (دست‌نخورده) ---
 ACMTS_PARAMS = {
     "dc_4h_period": 15, "width_lookback": 100, "trend_threshold": 1.5, "range_threshold": 0.5,
     "dc_1h_period": 15, "bb_1h_period": 30, "bb_1h_std": 2.0,
     "sl_atr_mult": 4.5, "tp_rr_trend": 2.5, "max_bars": 20,
 }
 
-# --- پارامترهای استراتژی ParkF ---
+# --- پارامترهای استراتژی ParkF (دست‌نخورده) ---
 PARKF_PARAMS = {
     "length": 50, "sigma": 1.0, "sl_atr_mult": 2.0
 }
@@ -57,7 +57,8 @@ LOG_FILE = Path("marginpad_trades_log.json")
 # TELEGRAM
 # ============================================================
 def send_telegram(text: str) -> bool:
-    if not TG_TOKEN or not TG_CHAT: return False
+    if not TG_TOKEN or not TG_CHAT:
+        return False
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
@@ -94,31 +95,44 @@ def format_closed_trade(trade):
 
 def format_strategy_summary(log_data):
     closed = log_data.get("closed_trades", [])
-    if not closed: return "<i>هنوز معامله بسته‌شده‌ای ثبت نشده است.</i>"
+    if not closed:
+        return "<i>هنوز معامله بسته‌شده‌ای ثبت نشده است.</i>"
 
     df = pd.DataFrame(closed)
     report = "📈 <b>گزارش بازدهی استراتژی‌ها:</b>\n\n"
-    
+
     for strat in ["ACMTS", "ParkF"]:
         strat_df = df[df["strategy"] == strat]
-        if strat_df.empty: 
+        if strat_df.empty:
             report += f"<b>🔹 {strat}</b>: هنوز معامله‌ای ندارد.\n\n"
             continue
-        
+
         total = len(strat_df)
         wins = len(strat_df[strat_df["pnl_pct"] > 0])
         losses = total - wins
         wr = (wins / total) * 100
         total_pnl = strat_df["pnl_pct"].sum()
         avg_pnl = total_pnl / total
-        
+
         report += f"<b>🔹 {strat}</b>\n"
         report += f"• کل معاملات: {total} (✅{wins} / ❌{losses})\n"
         report += f"• وین‌ریت: {wr:.1f}%\n"
         report += f"• سود/زیان کل: <b>{total_pnl:+.2f}%</b>\n"
         report += f"• میانگین هر معامله: {avg_pnl:+.2f}%\n\n"
-        
+
     return report
+
+# ============================================================
+# HELPERS
+# ============================================================
+def round_price(price: float, ref_price: float) -> float:
+    """قیمت را بر اساس تعداد اعشار قیمت مرجع رُند می‌کند (حداکثر ۸ رقم)."""
+    s = f"{ref_price:.10f}".rstrip("0")
+    if "." in s:
+        dec = min(len(s.split(".")[1]), 8)
+    else:
+        dec = 0
+    return round(price, dec)
 
 # ============================================================
 # MARGINPAD API
@@ -139,9 +153,26 @@ def get_balance():
     return r.json()
 
 def open_position(symbol, side, margin, leverage, sl, tp, coid):
-    body = {"symbol": symbol, "side": side, "margin_usd": round(margin, 2), "leverage": leverage, "sl": sl, "tp": tp, "client_order_id": coid}
+    """ارسال سفارش. در صورت خطا، بدنه پاسخ کامل چاپ می‌شود."""
+    body = {
+        "symbol": symbol,
+        "side": side,
+        "margin_usd": round(margin, 2),
+        "leverage": leverage,
+        "sl": sl,
+        "tp": tp,
+        "client_order_id": coid,
+    }
     r = requests.post(f"{BASE}/open", headers=H_JSON, json=body, timeout=15)
-    r.raise_for_status()
+    if r.status_code not in (200, 201):
+        # ✅ نمایش بدنه کامل خطا برای تشخیص دلیل دقیق 400
+        try:
+            err_body = r.json()
+        except Exception:
+            err_body = r.text[:800]
+        print(f"  [{symbol}] HTTP {r.status_code} — error: {err_body}")
+        print(f"  [{symbol}] payload sent: {body}")
+        return None
     return r.json()
 
 # ============================================================
@@ -173,12 +204,13 @@ def klines_to_df(klines):
     return df.set_index("time").sort_index()
 
 # ============================================================
-# STRATEGY 1: ACMTS
+# STRATEGY 1: ACMTS (بدون تغییر)
 # ============================================================
 def detect_acmts(df_1h, df_4h):
     P = ACMTS_PARAMS
     n = len(df_1h)
-    if n < P["dc_1h_period"] + 20 or len(df_4h) < (P["dc_4h_period"] + P["width_lookback"]): return None
+    if n < P["dc_1h_period"] + 20 or len(df_4h) < (P["dc_4h_period"] + P["width_lookback"]):
+        return None
 
     close, high, low = df_1h["close"].values, df_1h["high"].values, df_1h["low"].values
     atr = compute_atr(df_1h)
@@ -190,7 +222,7 @@ def detect_acmts(df_1h, df_4h):
     w4 = (dc_h4 - dc_l4) / np.where(mid4 > 0, mid4, 1)
     wm4 = pd.Series(w4).rolling(P["width_lookback"]).median().values
     r4 = w4 / np.where(wm4 > 0, wm4, 1)
-    
+
     reg_raw = np.zeros(len(df_4h), dtype=int)
     reg_raw[r4 > P["trend_threshold"]] = 1
     reg_raw[r4 < P["range_threshold"]] = -1
@@ -205,33 +237,44 @@ def detect_acmts(df_1h, df_4h):
     prev = np.roll(close, 1); prev[0] = np.nan
 
     i = n - 2
-    if i < 1 or np.isnan(atr[i]): return None
+    if i < 1 or np.isnan(atr[i]):
+        return None
     sl_dist = P["sl_atr_mult"] * float(atr[i])
-    if sl_dist <= 0: return None
+    if sl_dist <= 0:
+        return None
 
     if regime[i] == 1:
         if prev[i] <= dc_h1[i] and close[i] > dc_h1[i]:
             entry, sl, tp = float(close[i]), float(close[i]) - sl_dist, float(close[i]) + P["tp_rr_trend"] * sl_dist
-            if 0 < (entry - sl) / entry < 0.15 and tp > entry: return {"strategy": "ACMTS", "side": "LONG", "entry": entry, "sl": sl, "tp": tp, "sl_pct": (entry-sl)/entry*100, "tp_pct": (tp-entry)/entry*100}
+            if 0 < (entry - sl) / entry < 0.15 and tp > entry:
+                return {"strategy": "ACMTS", "side": "LONG", "entry": entry, "sl": sl, "tp": tp,
+                        "sl_pct": (entry-sl)/entry*100, "tp_pct": (tp-entry)/entry*100}
         if prev[i] >= dc_l1[i] and close[i] < dc_l1[i]:
             entry, sl, tp = float(close[i]), float(close[i]) + sl_dist, float(close[i]) - P["tp_rr_trend"] * sl_dist
-            if 0 < (sl - entry) / entry < 0.15 and tp < entry: return {"strategy": "ACMTS", "side": "SHORT", "entry": entry, "sl": sl, "tp": tp, "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100}
+            if 0 < (sl - entry) / entry < 0.15 and tp < entry:
+                return {"strategy": "ACMTS", "side": "SHORT", "entry": entry, "sl": sl, "tp": tp,
+                        "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100}
     elif regime[i] == -1:
         if low[i] <= bb_l[i] and close[i] > bb_l[i] and bb_mid[i] > close[i]:
             entry, sl, tp = float(close[i]), float(close[i]) - sl_dist, float(bb_mid[i])
-            if 0 < (entry - sl) / entry < 0.15 and tp > entry: return {"strategy": "ACMTS", "side": "LONG", "entry": entry, "sl": sl, "tp": tp, "sl_pct": (entry-sl)/entry*100, "tp_pct": (tp-entry)/entry*100}
+            if 0 < (entry - sl) / entry < 0.15 and tp > entry:
+                return {"strategy": "ACMTS", "side": "LONG", "entry": entry, "sl": sl, "tp": tp,
+                        "sl_pct": (entry-sl)/entry*100, "tp_pct": (tp-entry)/entry*100}
         if high[i] >= bb_u[i] and close[i] < bb_u[i] and bb_mid[i] < close[i]:
             entry, sl, tp = float(close[i]), float(close[i]) + sl_dist, float(bb_mid[i])
-            if 0 < (sl - entry) / entry < 0.15 and tp < entry: return {"strategy": "ACMTS", "side": "SHORT", "entry": entry, "sl": sl, "tp": tp, "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100}
+            if 0 < (sl - entry) / entry < 0.15 and tp < entry:
+                return {"strategy": "ACMTS", "side": "SHORT", "entry": entry, "sl": sl, "tp": tp,
+                        "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100}
     return None
 
 # ============================================================
-# STRATEGY 2: ParkF
+# STRATEGY 2: ParkF (بدون تغییر)
 # ============================================================
 def detect_parkf(df):
     P = PARKF_PARAMS
     n = len(df)
-    if n < P["length"] + 5: return None
+    if n < P["length"] + 5:
+        return None
     close, high, low = df["close"].values, df["high"].values, df["low"].values
     atr = compute_atr(df)
 
@@ -247,28 +290,32 @@ def detect_parkf(df):
     tv = ints[:, None] + slopes[:, None] * x
     resid = y_win - tv
     stds = np.sqrt((resid ** 2).mean(axis=1))
-    
+
     base = np.full(n, np.nan); base[P["length"] - 1:] = ints
     std_arr = np.full(n, np.nan); std_arr[P["length"] - 1:] = stds
     upper = base + P["sigma"] * std_arr
     lower = base - P["sigma"] * std_arr
 
     i = n - 2
-    if i < P["length"] or np.isnan(base[i]): return None
+    if i < P["length"] or np.isnan(base[i]):
+        return None
     p, hi, lo, a = close[i], high[i], low[i], atr[i]
-    
+
     sl_dist = P["sl_atr_mult"] * a
-    if sl_dist <= 0: return None
+    if sl_dist <= 0:
+        return None
 
     if lo <= lower[i] and p > lower[i]:
         entry, sl, tp = p, p - sl_dist, base[i]
         if 0 < (entry - sl) / entry < 0.15 and tp > entry:
-            return {"strategy": "ParkF", "side": "LONG", "entry": entry, "sl": sl, "tp": tp, "sl_pct": (entry-sl)/entry*100, "tp_pct": (tp-entry)/entry*100}
-    
+            return {"strategy": "ParkF", "side": "LONG", "entry": entry, "sl": sl, "tp": tp,
+                    "sl_pct": (entry-sl)/entry*100, "tp_pct": (tp-entry)/entry*100}
+
     if hi >= upper[i] and p < upper[i]:
         entry, sl, tp = p, p + sl_dist, base[i]
         if 0 < (sl - entry) / entry < 0.15 and tp < entry:
-            return {"strategy": "ParkF", "side": "SHORT", "entry": entry, "sl": sl, "tp": tp, "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100}
+            return {"strategy": "ParkF", "side": "SHORT", "entry": entry, "sl": sl, "tp": tp,
+                    "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100}
     return None
 
 # ============================================================
@@ -295,7 +342,7 @@ def run_scan() -> int:
     except Exception as e:
         print(f"FATAL positions: {e}"); return 1
 
-    # Detect server-side closes & Calculate PnL
+    # --- تشخیص معاملات بسته‌شده و محاسبه PnL ---
     newly_closed = []
     for sym in list(log["open_entries"].keys()):
         if sym not in open_positions:
@@ -305,10 +352,12 @@ def run_scan() -> int:
                 current_price = float(k[-1]["close"])
                 entry_price = entry_info["entry"]
                 side = entry_info["side"]
-                
-                if side == "LONG": pnl = (current_price - entry_price) / entry_price * 100
-                else: pnl = (entry_price - current_price) / entry_price * 100
-                
+
+                if side == "LONG":
+                    pnl = (current_price - entry_price) / entry_price * 100
+                else:
+                    pnl = (entry_price - current_price) / entry_price * 100
+
                 closed_record = {
                     "symbol": sym, "strategy": entry_info["strategy"], "side": side,
                     "entry": entry_price, "exit": current_price, "pnl_pct": round(pnl, 2)
@@ -322,7 +371,8 @@ def run_scan() -> int:
     new_trades = []
 
     for sym in SYMBOLS:
-        if sym in open_positions: continue
+        if sym in open_positions:
+            continue
 
         try:
             k1h = get_klines(sym, "60")
@@ -332,71 +382,110 @@ def run_scan() -> int:
 
         signals = []
 
-        # Check ACMTS
+        # بررسی ACMTS
         try:
             k4h = get_klines(sym, "240")
             df_4h = klines_to_df(k4h[-200:])
             s = detect_acmts(df_1h, df_4h)
-            if s: signals.append(s)
-        except Exception: pass
+            if s:
+                signals.append(s)
+        except Exception:
+            pass
 
-        # Check ParkF
+        # بررسی ParkF
         try:
             s = detect_parkf(df_1h)
-            if s: signals.append(s)
-        except Exception: pass
+            if s:
+                signals.append(s)
+        except Exception:
+            pass
 
-        if signals:
-            sig = signals[0]
-            
-            risk_amount = balance_usd * RISK_PCT_PER_TRADE
-            sl_frac = sig["sl_pct"] / 100.0
-            notional = risk_amount / sl_frac
-            margin = max(min(notional / LEVERAGE, balance_usd * MAX_MARGIN_PCT), 1.0)
-            coid = f"{sig['strategy']}-{sym}-{int(now.timestamp())}"
+        if not signals:
+            continue
 
-            try:
-                resp = open_position(sym, sig["side"].lower(), margin, LEVERAGE, sig["sl"], sig["tp"], coid)
-            except Exception as e:
-                print(f"  [{sym}] open error: {str(e)[:60]}")
+        sig = signals[0]  # اولویت با ACMTS
+
+        # --- ✅ اعتبارسنجی با قیمت لحظه‌ای ---
+        try:
+            current_price = float(k1h[-1]["close"])
+        except Exception:
+            continue
+
+        if sig["side"] == "LONG":
+            if current_price <= sig["sl"]:
+                print(f"  [{sym}] SKIP: price {current_price:.6f} hit SL {sig['sl']:.6f}")
+                continue
+            if current_price >= sig["tp"]:
+                print(f"  [{sym}] SKIP: price {current_price:.6f} passed TP {sig['tp']:.6f}")
+                continue
+        else:  # SHORT
+            if current_price >= sig["sl"]:
+                print(f"  [{sym}] SKIP: price {current_price:.6f} hit SL {sig['sl']:.6f}")
+                continue
+            if current_price <= sig["tp"]:
+                print(f"  [{sym}] SKIP: price {current_price:.6f} passed TP {sig['tp']:.6f}")
                 continue
 
-            if resp.get("idempotent"): continue
+        # ✅ حداقل فاصله ۰.۳٪ از قیمت فعلی تا SL/TP
+        min_dist = current_price * 0.003
+        if abs(current_price - sig["sl"]) < min_dist or abs(current_price - sig["tp"]) < min_dist:
+            print(f"  [{sym}] SKIP: SL/TP too close to current price ({current_price:.6f})")
+            continue
 
-            log["open_entries"][sym] = {
-                "strategy": sig["strategy"], "side": sig["side"], "entry": sig["entry"],
-                "sl": sig["sl"], "tp": sig["tp"], "margin": margin
-            }
-            new_trades.append((sym, sig, margin))
-            
-            emoji = "🟢" if sig["side"] == "LONG" else "🔴"
-            print(f"  {emoji} [{sig['strategy']}] {sig['side']} {sym} @ {sig['entry']:.6f} | Margin: ${margin:.2f}")
+        # محاسبه مارجین
+        risk_amount = balance_usd * RISK_PCT_PER_TRADE
+        sl_frac = sig["sl_pct"] / 100.0
+        if sl_frac <= 0:
+            continue
+        notional = risk_amount / sl_frac
+        margin = max(min(notional / LEVERAGE, balance_usd * MAX_MARGIN_PCT), 1.0)
+        coid = f"{sig['strategy']}-{sym}-{int(now.timestamp())}"
+
+        # ✅ رُند کردن قیمت‌ها به دقت نماد
+        sl_r = round_price(sig["sl"], sig["entry"])
+        tp_r = round_price(sig["tp"], sig["entry"])
+
+        # ارسال سفارش
+        try:
+            resp = open_position(sym, sig["side"].lower(), margin, LEVERAGE, sl_r, tp_r, coid)
+        except Exception as e:
+            print(f"  [{sym}] network error: {e}")
+            continue
+
+        if resp is None:
+            continue
+        if resp.get("idempotent"):
+            continue
+
+        log["open_entries"][sym] = {
+            "strategy": sig["strategy"], "side": sig["side"], "entry": sig["entry"],
+            "sl": sig["sl"], "tp": sig["tp"], "margin": margin
+        }
+        new_trades.append((sym, sig, margin))
+
+        emoji = "🟢" if sig["side"] == "LONG" else "🔴"
+        print(f"  {emoji} [{sig['strategy']}] {sig['side']} {sym} @ {sig['entry']:.6f} | Margin: ${margin:.2f}")
 
     save_log(log)
 
     # ==========================================
-    # Build Telegram Report
+    # ساخت گزارش تلگرام
     # ==========================================
     msg_blocks = []
-    
-    # 1. New Trades
+
     if new_trades:
         msg_blocks.append(f"<b>🔔 معاملات جدید — {now.strftime('%H:%M')} UTC</b>")
         for sym, sig, margin in new_trades:
             msg_blocks.append(format_new_trade(sym, sig, margin, balance_usd))
-            
-    # 2. Newly Closed Trades
+
     if newly_closed:
         msg_blocks.append(f"<b>🔒 معاملات بسته‌شده — {now.strftime('%H:%M')} UTC</b>")
         for t in newly_closed:
             msg_blocks.append(format_closed_trade(t))
-            
-    # 3. Performance Summary
+
     msg_blocks.append(format_strategy_summary(log))
-        
+
     if msg_blocks and (new_trades or newly_closed):
-        # فقط وقتی پیام میدهیم که معامله جدیدی باز یا بسته شده باشد
-        # (اگر فقط گزارش آمار باشد و معامله‌ای نشده باشد، برای جلوگیری از اسپم پیام نمیدهیم)
         final_msg = "\n\n".join(msg_blocks)
         if send_telegram(final_msg):
             print(f"  [telegram] sent")
@@ -404,6 +493,7 @@ def run_scan() -> int:
     print(f"\nResult: {len(new_trades)} new | {len(newly_closed)} closed")
     print("=" * 70)
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(run_scan())
