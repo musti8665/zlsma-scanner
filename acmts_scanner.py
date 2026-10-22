@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MarginPad Multi-Strategy Scanner: ACMTS + ParkF (LONG/SHORT)
-Includes detailed Telegram reporting for new trades, closed trades, and strategy stats.
+MarginPad Winning Combo Scanner — 4 Strategies
+================================================
+  1. StrategyD   (30m) — SHORT only — RSI+QQE+Supertrend+Kijun+ATR ratio
+  2. GoldenCombo (1D)  — LONG only  — MA200+LSMA+RSI2+Pivot+TwinRange
+  3. ACMTS       (1H)  — L/S        — Regime-based Donchian/BB
+  4. ParkF       (1H)  — L/S        — Linear regression reversion (TP/RR filtered)
+
+Selection: pick highest priority; skip on LONG/SHORT conflict.
 """
 
 import os
@@ -13,6 +19,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
 from pathlib import Path
+from numpy.lib.stride_tricks import sliding_window_view
 
 # ============================================================
 # CONFIG
@@ -29,29 +36,97 @@ BASE = "https://marginpad.io/api/bot/v1"
 HEADERS = {"X-API-Key": API_KEY}
 H_JSON = {**HEADERS, "Content-Type": "application/json"}
 
-# ✅ ۳۰ ارز پشتیبانی‌شده توسط MarginPad
 SYMBOLS = [
     "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "LTC",
     "ENA", "TRX", "DOT", "ATOM", "NEAR", "ARB", "OP", "PEPE", "SHIB", "SUI",
     "APT", "INJ", "TIA", "SEI", "WIF", "LDO", "UNI", "AAVE", "FIL", "RENDER",
 ]
 
-# --- پارامترهای استراتژی ACMTS (دست‌نخورده) ---
+# --- ACMTS ---
 ACMTS_PARAMS = {
-    "dc_4h_period": 15, "width_lookback": 100, "trend_threshold": 1.5, "range_threshold": 0.5,
+    "dc_4h_period": 15, "width_lookback": 100,
+    "trend_threshold": 1.5, "range_threshold": 0.5,
     "dc_1h_period": 15, "bb_1h_period": 30, "bb_1h_std": 2.0,
     "sl_atr_mult": 4.5, "tp_rr_trend": 2.5, "max_bars": 20,
 }
 
-# --- پارامترهای استراتژی ParkF (دست‌نخورده) ---
+# --- ParkF ---
 PARKF_PARAMS = {
-    "length": 50, "sigma": 1.0, "sl_atr_mult": 2.0
+    "length": 50, "sigma": 1.0, "sl_atr_mult": 2.0,
+    "min_tp_dist_pct": 0.3, "min_rr": 0.5,
 }
 
+# --- GoldenCombo ---
+GOLDEN_PARAMS = {
+    "per1": 15, "mult1": 2.0, "per2": 85, "mult2": 2.0,
+    "sl_mult": 4.0, "lsma_period": 50, "rsi_period": 2,
+    "pivot_period": 4, "tp_rr": 2.0, "min_bars": 220,
+}
+
+# --- Strategy D (Config D Final Winner — SHORT 30m) ---
+SD_PARAMS = {
+    "rsi_period": 2, "pivot_lookback": 4, "rsi_threshold": 6.5,
+    "kijun_period": 42,
+    "qqe_rsi": 10, "qqe_smooth": 6, "qqe_factor": 4.236,
+    "atr_ratio_win": 200, "atr_ratio_min": 0.9,
+    "st_period": 10, "st_mult": 3.0,
+    "sl_atr": 2.25, "tp_rr": 4.0,
+    "min_bars": 220,
+}
+
+# --- Risk / Sizing ---
 RISK_PCT_PER_TRADE = 0.00125
 LEVERAGE = 10
-MAX_MARGIN_PCT = 0.15
+MAX_NOTIONAL_PCT = 0.15
+MAX_TOTAL_POSITIONS = 8
 LOG_FILE = Path("marginpad_trades_log.json")
+
+# --- Global quality gates ---
+MIN_SL_PCT = 0.5
+MIN_TP_PCT = 0.3
+MIN_RR = 0.5
+
+TF_MAP = {"StrategyD": "30m", "GoldenCombo": "1D", "ACMTS": "1h", "ParkF": "1h"}
+PRIORITY = {"StrategyD": 4, "GoldenCombo": 3, "ACMTS": 2, "ParkF": 1}
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+def fmt_price(p: float) -> str:
+    if p >= 1000:   return f"{p:.2f}"
+    if p >= 1:      return f"{p:.4f}"
+    if p >= 0.01:   return f"{p:.6f}"
+    if p >= 0.0001: return f"{p:.8f}"
+    return f"{p:.10f}".rstrip('0')
+
+
+def round_price(price: float, ref_price: float) -> float:
+    s = f"{ref_price:.10f}".rstrip("0")
+    dec = min(len(s.split(".")[1]), 8) if "." in s else 0
+    return round(price, dec)
+
+
+def is_signal_ok(sig) -> tuple:
+    if sig["sl_pct"] < MIN_SL_PCT:
+        return False, f"SL too tight ({sig['sl_pct']:.2f}% < {MIN_SL_PCT}%)"
+    if sig["tp_pct"] < MIN_TP_PCT:
+        return False, f"TP too tight ({sig['tp_pct']:.2f}% < {MIN_TP_PCT}%)"
+    rr = sig["tp_pct"] / sig["sl_pct"]
+    if rr < MIN_RR:
+        return False, f"R/R too low ({rr:.2f} < {MIN_RR})"
+    return True, ""
+
+
+def pick_best_signal(signals):
+    if not signals:
+        return None
+    return sorted(
+        signals,
+        key=lambda s: (PRIORITY.get(s["strategy"], 0), s["tp_pct"] / max(s["sl_pct"], 1e-9)),
+        reverse=True,
+    )[0]
+
 
 # ============================================================
 # TELEGRAM
@@ -62,7 +137,8 @@ def send_telegram(text: str) -> bool:
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={"chat_id": TG_CHAT, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+            json={"chat_id": TG_CHAT, "text": text, "parse_mode": "HTML",
+                  "disable_web_page_preview": True},
             timeout=15,
         )
         return r.status_code == 200
@@ -70,28 +146,34 @@ def send_telegram(text: str) -> bool:
         print(f"  [telegram] error: {e}")
         return False
 
+
 def format_new_trade(sym, sig, margin, balance):
     emoji = "🟢" if sig["side"] == "LONG" else "🔴"
+    tf = TF_MAP.get(sig["strategy"], "1h")
+    rr = sig["tp_pct"] / sig["sl_pct"] if sig["sl_pct"] > 0 else 0
     return (
         f"{emoji} <b>معامله جدید: {sym} {sig['side']}</b>\n"
         f"🧠 استراتژی: <b>{sig['strategy']}</b>\n"
-        f"📊 تایم‌فریم: <b>1h</b>\n\n"
-        f"📍 قیمت ورود: <code>{sig['entry']:.6f}</code>\n"
-        f"🛑 حد ضرر: <code>{sig['sl']:.6f}</code> (-{sig['sl_pct']:.2f}%)\n"
-        f"🎯 حد سود: <code>{sig['tp']:.6f}</code> (+{sig['tp_pct']:.2f}%)\n"
+        f"📊 تایم‌فریم: <b>{tf}</b>\n\n"
+        f"📍 قیمت ورود: <code>{fmt_price(sig['entry'])}</code>\n"
+        f"🛑 حد ضرر: <code>{fmt_price(sig['sl'])}</code> (-{sig['sl_pct']:.2f}%)\n"
+        f"🎯 حد سود: <code>{fmt_price(sig['tp'])}</code> (+{sig['tp_pct']:.2f}%)\n"
+        f"📊 R/R: <b>{rr:.2f}</b>\n"
         f"💰 مارجین: <b>${margin:.2f}</b> (اهرم {LEVERAGE}×)\n"
         f"🏦 موجودی کل: ${balance:,.2f}\n"
     )
+
 
 def format_closed_trade(trade):
     emoji = "✅" if trade["pnl_pct"] > 0 else "❌"
     return (
         f"{emoji} <b>معامله بسته شد: {trade['symbol']} {trade['side']}</b>\n"
         f"🧠 استراتژی: <b>{trade['strategy']}</b>\n\n"
-        f"📍 قیمت ورود: <code>{trade['entry']:.6f}</code>\n"
-        f"🏁 قیمت خروج: <code>{trade['exit']:.6f}</code>\n"
+        f"📍 قیمت ورود: <code>{fmt_price(trade['entry'])}</code>\n"
+        f"🏁 قیمت خروج: <code>{fmt_price(trade['exit'])}</code>\n"
         f"📊 سود/ضرر: <b>{trade['pnl_pct']:+.2f}%</b>\n"
     )
+
 
 def format_strategy_summary(log_data):
     closed = log_data.get("closed_trades", [])
@@ -101,7 +183,7 @@ def format_strategy_summary(log_data):
     df = pd.DataFrame(closed)
     report = "📈 <b>گزارش بازدهی استراتژی‌ها:</b>\n\n"
 
-    for strat in ["ACMTS", "ParkF"]:
+    for strat in ["StrategyD", "GoldenCombo", "ACMTS", "ParkF"]:
         strat_df = df[df["strategy"] == strat]
         if strat_df.empty:
             report += f"<b>🔹 {strat}</b>: هنوز معامله‌ای ندارد.\n\n"
@@ -122,17 +204,6 @@ def format_strategy_summary(log_data):
 
     return report
 
-# ============================================================
-# HELPERS
-# ============================================================
-def round_price(price: float, ref_price: float) -> float:
-    """قیمت را بر اساس تعداد اعشار قیمت مرجع رُند می‌کند (حداکثر ۸ رقم)."""
-    s = f"{ref_price:.10f}".rstrip("0")
-    if "." in s:
-        dec = min(len(s.split(".")[1]), 8)
-    else:
-        dec = 0
-    return round(price, dec)
 
 # ============================================================
 # MARGINPAD API
@@ -142,30 +213,48 @@ def get_klines(symbol, interval):
     r.raise_for_status()
     return r.json()
 
+
+def get_klines_30m(symbol):
+    for interval in ("30", "30m", "M30"):
+        try:
+            k = get_klines(symbol, interval)
+            if k and len(k) >= 50:
+                return k
+        except Exception:
+            continue
+    return None
+
+
+def get_daily_klines(symbol):
+    for interval in ("1440", "D", "1d", "1D", "day"):
+        try:
+            k = get_klines(symbol, interval)
+            if k and len(k) >= 50:
+                return k
+        except Exception:
+            continue
+    return None
+
+
 def get_positions():
     r = requests.get(f"{BASE}/positions?status=open", headers=HEADERS, timeout=15)
     r.raise_for_status()
     return {p["symbol"]: p for p in r.json().get("positions", [])}
+
 
 def get_balance():
     r = requests.get(f"{BASE}/balance", headers=HEADERS, timeout=15)
     r.raise_for_status()
     return r.json()
 
+
 def open_position(symbol, side, margin, leverage, sl, tp, coid):
-    """ارسال سفارش. در صورت خطا، بدنه پاسخ کامل چاپ می‌شود."""
     body = {
-        "symbol": symbol,
-        "side": side,
-        "margin_usd": round(margin, 2),
-        "leverage": leverage,
-        "sl": sl,
-        "tp": tp,
-        "client_order_id": coid,
+        "symbol": symbol, "side": side, "margin_usd": round(margin, 2),
+        "leverage": leverage, "sl": sl, "tp": tp, "client_order_id": coid,
     }
     r = requests.post(f"{BASE}/open", headers=H_JSON, json=body, timeout=15)
     if r.status_code not in (200, 201):
-        # ✅ نمایش بدنه کامل خطا برای تشخیص دلیل دقیق 400
         try:
             err_body = r.json()
         except Exception:
@@ -175,8 +264,9 @@ def open_position(symbol, side, margin, leverage, sl, tp, coid):
         return None
     return r.json()
 
+
 # ============================================================
-# LOG MANAGEMENT
+# LOG
 # ============================================================
 def load_log():
     if LOG_FILE.exists():
@@ -186,11 +276,13 @@ def load_log():
             pass
     return {"open_entries": {}, "closed_trades": []}
 
+
 def save_log(log):
     LOG_FILE.write_text(json.dumps(log, indent=2, default=str))
 
+
 # ============================================================
-# INDICATORS
+# INDICATORS (shared)
 # ============================================================
 def compute_atr(df, length=14):
     h, l, c = df["high"].values, df["low"].values, df["close"].values
@@ -198,13 +290,165 @@ def compute_atr(df, length=14):
     tr[0] = h[0] - l[0]
     return pd.Series(tr).ewm(alpha=1/length, adjust=False).mean().values
 
+
 def klines_to_df(klines):
     df = pd.DataFrame(klines)
     df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
     return df.set_index("time").sort_index()
 
+
+# --- GoldenCombo indicators ---
+def compute_lsma(series, period):
+    x = np.arange(period); x_sum = x.sum(); x2_sum = (x**2).sum()
+    y_sum = series.rolling(period).sum()
+    xy_sum = series.rolling(period).apply(lambda y: (y * x).sum(), raw=True)
+    slope = (period * xy_sum - x_sum * y_sum) / (period * x2_sum - x_sum**2)
+    return slope * (period - 1) + (y_sum - slope * x_sum) / period
+
+
+def compute_rsi_gc(series, period):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
+    return 100 - (100 / (1 + gain / loss))
+
+
+def compute_pivot_high(series, n):
+    pivot = series == series.rolling(2 * n + 1, center=True).max()
+    return pivot.shift(n).fillna(False)
+
+
+def apply_twin_range_filter(close, per1, mult1, per2, mult2):
+    def smoothrng(x, t, m):
+        wper = t * 2 - 1
+        avrng = x.diff().abs().ewm(span=t, adjust=False).mean()
+        return avrng.ewm(span=wper, adjust=False).mean() * m
+
+    smrng = (smoothrng(close, per1, mult1) + smoothrng(close, per2, mult2)) / 2
+    filt = np.zeros(len(close)); filt[0] = close.iloc[0]
+    for i in range(1, len(close)):
+        pf = filt[i-1]; x = close.iloc[i]; r = smrng.iloc[i]
+        filt[i] = (pf if (x > pf and (x - r) < pf) else
+                   (x - r) if (x > pf) else
+                   pf if (x + r) > pf else (x + r))
+    filt = pd.Series(filt, index=close.index)
+
+    up = np.zeros(len(close)); dn = np.zeros(len(close))
+    for i in range(1, len(close)):
+        if filt.iloc[i] > filt.iloc[i-1]: up[i] = up[i-1] + 1; dn[i] = 0
+        elif filt.iloc[i] < filt.iloc[i-1]: up[i] = 0; dn[i] = dn[i-1] + 1
+        else: up[i] = up[i-1]; dn[i] = dn[i-1]
+    up = pd.Series(up, index=close.index); dn = pd.Series(dn, index=close.index)
+
+    long_cond = (close > filt) & (up > 0)
+    short_cond = (close < filt) & (dn > 0)
+
+    cond_ini = np.zeros(len(close))
+    for i in range(1, len(close)):
+        cond_ini[i] = 1 if long_cond.iloc[i] else -1 if short_cond.iloc[i] else cond_ini[i-1]
+    cond_ini = pd.Series(cond_ini, index=close.index)
+
+    return long_cond & (cond_ini.shift(1) == -1), short_cond & (cond_ini.shift(1) == 1)
+
+
+# --- Strategy D indicators ---
+def sd_rsi(close, period):
+    d = np.diff(close, prepend=close[0])
+    g = pd.Series(np.where(d > 0, d, 0)).ewm(alpha=1/period, adjust=False).mean().values
+    lo = pd.Series(np.where(d < 0, -d, 0)).ewm(alpha=1/period, adjust=False).mean().values
+    return 100 - 100 / (1 + g / np.where(lo > 0, lo, np.nan))
+
+
+def sd_pivots_low(series, lookback):
+    n = len(series)
+    out = np.zeros(n, dtype=bool)
+    if n < 2*lookback + 1:
+        return out
+    w = sliding_window_view(series, 2*lookback + 1)
+    c = w[:, lookback]
+    out[lookback:lookback+len(c)] = (
+        (c < w[:, :lookback].min(axis=1)) &
+        (c < w[:, lookback+1:].min(axis=1))
+    )
+    return out
+
+
+def sd_atr(high, low, close, period=14):
+    tr = np.maximum(high - low,
+                    np.maximum(np.abs(high - np.roll(close, 1)),
+                               np.abs(low - np.roll(close, 1))))
+    tr[0] = high[0] - low[0]
+    return pd.Series(tr).ewm(alpha=1/period, adjust=False).mean().values
+
+
+def sd_kijun(high, low, period):
+    hh = pd.Series(high).rolling(period).max().values
+    ll = pd.Series(low).rolling(period).min().values
+    return (hh + ll) / 2
+
+
+def sd_qqe_flip(close, rsi_period, smooth, factor=4.236):
+    n = len(close)
+    r = sd_rsi(close, rsi_period)
+    rma = pd.Series(r).ewm(span=smooth, adjust=False).mean().values
+    rdiff = np.abs(np.diff(r, prepend=r[0]))
+    wilder = 2*rsi_period - 1
+    atr_r = pd.Series(rdiff).ewm(alpha=1/wilder, adjust=False).mean().values
+    dar = atr_r * factor
+    trend = np.zeros(n, dtype=int)
+    if n == 0:
+        return np.zeros(n, dtype=bool)
+    lb = np.full(n, np.nan); sb = np.full(n, np.nan)
+    lb[0] = rma[0] - dar[0]; sb[0] = rma[0] + dar[0]; trend[0] = 1
+    for i in range(1, n):
+        nl = rma[i] - dar[i]; ns = rma[i] + dar[i]
+        if rma[i-1] > lb[i-1] and rma[i] > lb[i-1]:
+            lb[i] = max(lb[i-1], nl)
+        else:
+            lb[i] = nl
+        if rma[i-1] < sb[i-1] and rma[i] < sb[i-1]:
+            sb[i] = min(sb[i-1], ns)
+        else:
+            sb[i] = ns
+        if rma[i] > sb[i-1]:
+            trend[i] = 1
+        elif rma[i] < lb[i-1]:
+            trend[i] = -1
+        else:
+            trend[i] = trend[i-1]
+    flip = np.zeros(n, dtype=bool)
+    for i in range(1, n):
+        if trend[i-1] == 1 and trend[i] == -1:
+            flip[i] = True
+    return flip
+
+
+def sd_supertrend(high, low, close, period, mult):
+    n = len(close)
+    atr_s = pd.Series(sd_atr(high, low, close)).rolling(period).mean().values
+    hl2 = (high + low) / 2
+    upper = hl2 + mult * atr_s
+    lower = hl2 - mult * atr_s
+    trend = np.ones(n, dtype=int)
+    fu = np.full(n, np.nan); fl = np.full(n, np.nan)
+    for i in range(period, n):
+        if np.isnan(upper[i]) or np.isnan(lower[i]):
+            continue
+        if np.isnan(fu[i-1]):
+            fu[i] = upper[i]; fl[i] = lower[i]
+            trend[i] = 1 if close[i] > fl[i] else -1
+            continue
+        fu[i] = upper[i] if (upper[i] < fu[i-1] or close[i-1] > fu[i-1]) else fu[i-1]
+        fl[i] = lower[i] if (lower[i] > fl[i-1] or close[i-1] < fl[i-1]) else fl[i-1]
+        if trend[i-1] == 1:
+            trend[i] = -1 if close[i] < fl[i] else 1
+        else:
+            trend[i] = 1 if close[i] > fu[i] else -1
+    return trend
+
+
 # ============================================================
-# STRATEGY 1: ACMTS (بدون تغییر)
+# STRATEGY 1: ACMTS
 # ============================================================
 def detect_acmts(df_1h, df_4h):
     P = ACMTS_PARAMS
@@ -226,7 +470,8 @@ def detect_acmts(df_1h, df_4h):
     reg_raw = np.zeros(len(df_4h), dtype=int)
     reg_raw[r4 > P["trend_threshold"]] = 1
     reg_raw[r4 < P["range_threshold"]] = -1
-    regime = pd.Series(reg_raw, index=df_4h.index).reindex(df_1h.index, method="ffill").fillna(0).values.astype(int)
+    regime = pd.Series(reg_raw, index=df_4h.index).reindex(
+        df_1h.index, method="ffill").fillna(0).values.astype(int)
 
     dc_h1 = pd.Series(high).rolling(P["dc_1h_period"]).max().shift(1).values
     dc_l1 = pd.Series(low).rolling(P["dc_1h_period"]).min().shift(1).values
@@ -267,8 +512,9 @@ def detect_acmts(df_1h, df_4h):
                         "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100}
     return None
 
+
 # ============================================================
-# STRATEGY 2: ParkF (بدون تغییر)
+# STRATEGY 2: ParkF
 # ============================================================
 def detect_parkf(df):
     P = PARKF_PARAMS
@@ -306,17 +552,149 @@ def detect_parkf(df):
         return None
 
     if lo <= lower[i] and p > lower[i]:
-        entry, sl, tp = p, p - sl_dist, base[i]
-        if 0 < (entry - sl) / entry < 0.15 and tp > entry:
+        entry = p; sl = p - sl_dist; tp = base[i]
+        tp_dist = tp - entry; sl_dist_actual = entry - sl
+        min_tp = entry * P["min_tp_dist_pct"] / 100.0
+        if (0 < sl_dist_actual / entry < 0.15
+                and tp_dist >= min_tp
+                and tp_dist >= P["min_rr"] * sl_dist_actual):
             return {"strategy": "ParkF", "side": "LONG", "entry": entry, "sl": sl, "tp": tp,
                     "sl_pct": (entry-sl)/entry*100, "tp_pct": (tp-entry)/entry*100}
 
     if hi >= upper[i] and p < upper[i]:
-        entry, sl, tp = p, p + sl_dist, base[i]
-        if 0 < (sl - entry) / entry < 0.15 and tp < entry:
+        entry = p; sl = p + sl_dist; tp = base[i]
+        tp_dist = entry - tp; sl_dist_actual = sl - entry
+        min_tp = entry * P["min_tp_dist_pct"] / 100.0
+        if (0 < sl_dist_actual / entry < 0.15
+                and tp_dist >= min_tp
+                and tp_dist >= P["min_rr"] * sl_dist_actual):
             return {"strategy": "ParkF", "side": "SHORT", "entry": entry, "sl": sl, "tp": tp,
                     "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100}
     return None
+
+
+# ============================================================
+# STRATEGY 3: GoldenCombo (1D, LONG only)
+# ============================================================
+def detect_golden_combo(df_daily):
+    P = GOLDEN_PARAMS
+    n = len(df_daily)
+    if n < P["min_bars"]:
+        return None
+
+    close = df_daily["close"]
+    high = df_daily["high"]
+    low = df_daily["low"]
+
+    ma200 = close.rolling(200).mean()
+    lsma = compute_lsma(close, P["lsma_period"])
+    rsi = compute_rsi_gc(close, P["rsi_period"])
+    pivot_h = compute_pivot_high(high, P["pivot_period"])
+    last_pivot_val = high.where(pivot_h).ffill()
+
+    tr = np.maximum(high - low, np.maximum(np.abs(high - close.shift(1)), np.abs(low - close.shift(1))))
+    atr = tr.rolling(14).mean()
+
+    long_sig, _short_sig = apply_twin_range_filter(close, P["per1"], P["mult1"], P["per2"], P["mult2"])
+
+    i = n - 2
+    price = float(close.iloc[i])
+
+    if (pd.isna(ma200.iloc[i]) or pd.isna(lsma.iloc[i])
+            or pd.isna(rsi.iloc[i]) or pd.isna(atr.iloc[i])):
+        return None
+
+    is_200ma_ok = price > float(ma200.iloc[i])
+    is_lsma_ok = (price > float(lsma.iloc[i])) and (float(lsma.iloc[i]) > float(lsma.iloc[i-1]))
+    is_rsi_ok = float(rsi.iloc[i]) > 50
+    is_pivot_ok = (not pd.isna(last_pivot_val.iloc[i])) and (price > float(last_pivot_val.iloc[i]))
+    recent_long = bool(long_sig.iloc[i]) or bool(long_sig.iloc[i-1])
+
+    if is_200ma_ok and is_lsma_ok and is_rsi_ok and is_pivot_ok and recent_long:
+        sl = price - P["sl_mult"] * float(atr.iloc[i])
+        sl_dist = price - sl
+        if sl_dist <= 0:
+            return None
+        tp = price + P["tp_rr"] * sl_dist
+        sl_pct = sl_dist / price * 100
+        tp_pct = (tp - price) / price * 100
+        if 0 < sl_pct < 15 and tp_pct > 0:
+            return {"strategy": "GoldenCombo", "side": "LONG", "entry": price, "sl": sl, "tp": tp,
+                    "sl_pct": sl_pct, "tp_pct": tp_pct}
+    return None
+
+
+# ============================================================
+# STRATEGY 4: Strategy D (30m, SHORT only)
+# ============================================================
+def detect_strategy_d(df_30m):
+    """
+    Strategy D (Config D Final Winner) — SHORT only, 30m.
+
+    5 filters (all must align at last closed bar):
+      - RSI(2) < last_pivot(4) - 6.5
+      - close < Kijun(42)
+      - QQE(10,6) flipped bullish->bearish on this bar
+      - ATR_ratio(200) >= 0.9
+      - SuperTrend(10, 3.0) = downtrend
+
+    SL = 2.25 * ATR, TP = 4.0 * R.
+    """
+    P = SD_PARAMS
+    n = len(df_30m)
+    if n < P["min_bars"]:
+        return None
+
+    close = df_30m["close"].values
+    high = df_30m["high"].values
+    low = df_30m["low"].values
+
+    a = sd_atr(high, low, close)
+    r = sd_rsi(close, P["rsi_period"])
+
+    piv = sd_pivots_low(r, P["pivot_lookback"])
+    lpl = np.full(n, np.nan)
+    cur = np.nan
+    for t in range(n):
+        p_idx = t - P["pivot_lookback"]
+        if p_idx >= 0 and piv[p_idx]:
+            cur = r[p_idx]
+        lpl[t] = cur
+
+    kj = sd_kijun(high, low, P["kijun_period"])
+    flip = sd_qqe_flip(close, P["qqe_rsi"], P["qqe_smooth"], P["qqe_factor"])
+    atr_ratio = a / pd.Series(a).rolling(P["atr_ratio_win"]).mean().values
+    st = sd_supertrend(high, low, close, P["st_period"], P["st_mult"])
+
+    i = n - 2
+    if i < P["min_bars"] - 1:
+        return None
+    if (np.isnan(lpl[i]) or np.isnan(r[i]) or np.isnan(kj[i])
+            or np.isnan(atr_ratio[i]) or np.isnan(a[i])):
+        return None
+
+    cond_rsi = r[i] < lpl[i] - P["rsi_threshold"]
+    cond_kijun = close[i] < kj[i]
+    cond_qqe = bool(flip[i])
+    cond_atr = atr_ratio[i] >= P["atr_ratio_min"]
+    cond_st = st[i] == -1
+
+    if not (cond_rsi and cond_kijun and cond_qqe and cond_atr and cond_st):
+        return None
+
+    entry = float(close[i])
+    sl = entry + P["sl_atr"] * float(a[i])
+    risk = sl - entry
+    if risk <= 0 or risk / entry > 0.20:
+        return None
+    tp = entry - P["tp_rr"] * risk
+
+    return {
+        "strategy": "StrategyD", "side": "SHORT", "entry": entry, "sl": sl, "tp": tp,
+        "sl_pct": (sl - entry) / entry * 100,
+        "tp_pct": (entry - tp) / entry * 100,
+    }
+
 
 # ============================================================
 # MAIN
@@ -324,7 +702,7 @@ def detect_parkf(df):
 def run_scan() -> int:
     now = datetime.now(timezone.utc)
     print("=" * 70)
-    print(f"Multi-Strategy Scan — {now.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"Winning Combo Scan (4 strategies) — {now.strftime('%Y-%m-%d %H:%M UTC')}")
     print("=" * 70)
 
     log = load_log()
@@ -342,7 +720,7 @@ def run_scan() -> int:
     except Exception as e:
         print(f"FATAL positions: {e}"); return 1
 
-    # --- تشخیص معاملات بسته‌شده و محاسبه PnL ---
+    # --- Closed trades ---
     newly_closed = []
     for sym in list(log["open_entries"].keys()):
         if sym not in open_positions:
@@ -369,11 +747,18 @@ def run_scan() -> int:
                 print(f"  [{sym}] close calc error: {e}")
 
     new_trades = []
+    max_notional = balance_usd * MAX_NOTIONAL_PCT
 
     for sym in SYMBOLS:
         if sym in open_positions:
             continue
 
+        # global position cap
+        if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
+            print(f"  Max total positions ({MAX_TOTAL_POSITIONS}) reached — stopping")
+            break
+
+        # 1h data (ACMTS + ParkF + price validation)
         try:
             k1h = get_klines(sym, "60")
             df_1h = klines_to_df(k1h[-300:])
@@ -382,7 +767,29 @@ def run_scan() -> int:
 
         signals = []
 
-        # بررسی ACMTS
+        # ✅ Priority 4: StrategyD (30m, SHORT only)
+        try:
+            k30_raw = get_klines_30m(sym)
+            if k30_raw:
+                df_30m = klines_to_df(k30_raw[-500:])
+                s = detect_strategy_d(df_30m)
+                if s:
+                    signals.append(s)
+        except Exception:
+            pass
+
+        # Priority 3: GoldenCombo (1D, LONG only)
+        try:
+            k1d_raw = get_daily_klines(sym)
+            if k1d_raw:
+                df_1d = klines_to_df(k1d_raw[-500:])
+                s = detect_golden_combo(df_1d)
+                if s:
+                    signals.append(s)
+        except Exception:
+            pass
+
+        # Priority 2: ACMTS (1h + 4h)
         try:
             k4h = get_klines(sym, "240")
             df_4h = klines_to_df(k4h[-200:])
@@ -392,7 +799,7 @@ def run_scan() -> int:
         except Exception:
             pass
 
-        # بررسی ParkF
+        # Priority 1: ParkF (1h)
         try:
             s = detect_parkf(df_1h)
             if s:
@@ -403,9 +810,23 @@ def run_scan() -> int:
         if not signals:
             continue
 
-        sig = signals[0]  # اولویت با ACMTS
+        # --- Conflict detection: opposite directions = skip ---
+        if len(signals) > 1:
+            sides = set(s["side"] for s in signals)
+            if len(sides) > 1:
+                strats = [s["strategy"] for s in signals]
+                print(f"  [{sym}] SKIP: conflicting signals {strats}")
+                continue
 
-        # --- ✅ اعتبارسنجی با قیمت لحظه‌ای ---
+        sig = pick_best_signal(signals)
+
+        # --- Global quality gate ---
+        ok, reason = is_signal_ok(sig)
+        if not ok:
+            print(f"  [{sym}] SKIP signal ({sig['strategy']}): {reason}")
+            continue
+
+        # --- Live price validation ---
         try:
             current_price = float(k1h[-1]["close"])
         except Exception:
@@ -413,39 +834,37 @@ def run_scan() -> int:
 
         if sig["side"] == "LONG":
             if current_price <= sig["sl"]:
-                print(f"  [{sym}] SKIP: price {current_price:.6f} hit SL {sig['sl']:.6f}")
+                print(f"  [{sym}] SKIP: price hit SL")
                 continue
             if current_price >= sig["tp"]:
-                print(f"  [{sym}] SKIP: price {current_price:.6f} passed TP {sig['tp']:.6f}")
+                print(f"  [{sym}] SKIP: price passed TP")
                 continue
-        else:  # SHORT
+        else:
             if current_price >= sig["sl"]:
-                print(f"  [{sym}] SKIP: price {current_price:.6f} hit SL {sig['sl']:.6f}")
+                print(f"  [{sym}] SKIP: price hit SL")
                 continue
             if current_price <= sig["tp"]:
-                print(f"  [{sym}] SKIP: price {current_price:.6f} passed TP {sig['tp']:.6f}")
+                print(f"  [{sym}] SKIP: price passed TP")
                 continue
 
-        # ✅ حداقل فاصله ۰.۳٪ از قیمت فعلی تا SL/TP
         min_dist = current_price * 0.003
         if abs(current_price - sig["sl"]) < min_dist or abs(current_price - sig["tp"]) < min_dist:
-            print(f"  [{sym}] SKIP: SL/TP too close to current price ({current_price:.6f})")
+            print(f"  [{sym}] SKIP: SL/TP too close to current price")
             continue
 
-        # محاسبه مارجین
+        # --- Sizing ---
         risk_amount = balance_usd * RISK_PCT_PER_TRADE
         sl_frac = sig["sl_pct"] / 100.0
         if sl_frac <= 0:
             continue
-        notional = risk_amount / sl_frac
-        margin = max(min(notional / LEVERAGE, balance_usd * MAX_MARGIN_PCT), 1.0)
+        notional_raw = risk_amount / sl_frac
+        notional = min(notional_raw, max_notional)
+        margin = max(notional / LEVERAGE, 1.0)
         coid = f"{sig['strategy']}-{sym}-{int(now.timestamp())}"
 
-        # ✅ رُند کردن قیمت‌ها به دقت نماد
         sl_r = round_price(sig["sl"], sig["entry"])
         tp_r = round_price(sig["tp"], sig["entry"])
 
-        # ارسال سفارش
         try:
             resp = open_position(sym, sig["side"].lower(), margin, LEVERAGE, sl_r, tp_r, coid)
         except Exception as e:
@@ -464,30 +883,28 @@ def run_scan() -> int:
         new_trades.append((sym, sig, margin))
 
         emoji = "🟢" if sig["side"] == "LONG" else "🔴"
-        print(f"  {emoji} [{sig['strategy']}] {sig['side']} {sym} @ {sig['entry']:.6f} | Margin: ${margin:.2f}")
+        capped = " [capped]" if notional < notional_raw else ""
+        tf = TF_MAP.get(sig["strategy"], "1h")
+        rr = sig["tp_pct"] / sig["sl_pct"] if sig["sl_pct"] > 0 else 0
+        print(f"  {emoji} [{sig['strategy']} {tf}] {sig['side']} {sym} @ {fmt_price(sig['entry'])} "
+              f"| R/R {rr:.2f} | Margin: ${margin:.2f}{capped}")
 
     save_log(log)
 
-    # ==========================================
-    # ساخت گزارش تلگرام
-    # ==========================================
+    # --- Telegram ---
     msg_blocks = []
-
     if new_trades:
         msg_blocks.append(f"<b>🔔 معاملات جدید — {now.strftime('%H:%M')} UTC</b>")
         for sym, sig, margin in new_trades:
             msg_blocks.append(format_new_trade(sym, sig, margin, balance_usd))
-
     if newly_closed:
         msg_blocks.append(f"<b>🔒 معاملات بسته‌شده — {now.strftime('%H:%M')} UTC</b>")
         for t in newly_closed:
             msg_blocks.append(format_closed_trade(t))
-
     msg_blocks.append(format_strategy_summary(log))
 
     if msg_blocks and (new_trades or newly_closed):
-        final_msg = "\n\n".join(msg_blocks)
-        if send_telegram(final_msg):
+        if send_telegram("\n\n".join(msg_blocks)):
             print(f"  [telegram] sent")
 
     print(f"\nResult: {len(new_trades)} new | {len(newly_closed)} closed")
