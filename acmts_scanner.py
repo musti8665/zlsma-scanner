@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MarginPad Winning Combo Scanner — 4 Strategies
+MarginPad Winning Combo Scanner — 5 Strategies
 ================================================
   1. StrategyD   (30m) — SHORT only — RSI+QQE+Supertrend+Kijun+ATR ratio
   2. GoldenCombo (1D)  — LONG only  — MA200+LSMA+RSI2+Pivot+TwinRange
-  3. ACMTS       (1H)  — L/S        — Regime-based Donchian/BB
-  4. ParkF       (1H)  — L/S        — Linear regression reversion (TP/RR filtered)
+  3. COV-Pivot1  (5m/15m/30m/1h/4h/1D) — LONG only — Dual COV OR + Pivot1
+  4. ACMTS       (1H)  — L/S        — Regime-based Donchian/BB
+  5. ParkF       (1H)  — L/S        — Linear regression reversion (TP/RR filtered)
 
 Selection: pick highest priority; skip on LONG/SHORT conflict.
 """
@@ -36,9 +37,10 @@ BASE = "https://marginpad.io/api/bot/v1"
 HEADERS = {"X-API-Key": API_KEY}
 H_JSON = {**HEADERS, "Content-Type": "application/json"}
 
+# ✅ ۲۲ نماد
 SYMBOLS = [
-    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "LTC",
-    "ENA", "TRX", "DOT", "ATOM", "NEAR", "ARB", "OP", "PEPE", "SHIB", "SUI",
+    "ADA", "AVAX", "LINK", "LTC",
+    "ENA", "ATOM", "NEAR", "ARB", "OP", "PEPE", "SHIB", "SUI",
     "APT", "INJ", "TIA", "SEI", "WIF", "LDO", "UNI", "AAVE", "FIL", "RENDER",
 ]
 
@@ -74,6 +76,25 @@ SD_PARAMS = {
     "min_bars": 220,
 }
 
+# --- COV-Pivot1 (Dual COV OR + Pivot1) — LONG only, multi-timeframe ---
+COV_PARAMS = {
+    "cov1_n": 21, "cov1_m": 120,
+    "cov2_n": 5,  "cov2_m": 500,
+    "pivot1_p": 10,
+    "atr_p": 5, "sl_mult": 2.0,
+    "tp_rr": 2.0,        # TP = 2R (اضافه شده برای MarginPad)
+    "min_bars": 550,
+}
+
+COV_TIMEFRAMES = [
+    ("5m",  ["5", "5m", "M5"],                    1),
+    ("15m", ["15", "15m", "M15"],                 2),
+    ("30m", ["30", "30m", "M30"],                 3),
+    ("1h",  ["60", "60m", "H1"],                  4),
+    ("4h",  ["240", "4h", "H4"],                  5),
+    ("1D",  ["1440", "D", "1d", "1D", "day"],     6),
+]
+
 # --- Risk / Sizing ---
 RISK_PCT_PER_TRADE = 0.00125
 LEVERAGE = 10
@@ -86,8 +107,16 @@ MIN_SL_PCT = 0.5
 MIN_TP_PCT = 0.3
 MIN_RR = 0.5
 
+# --- Priority & TF mapping ---
+PRIORITY = {
+    "StrategyD": 4,
+    "GoldenCombo": 3,
+    "COV-Pivot1": 3,     # tie with GoldenCombo — R/R breaks tie
+    "ACMTS": 2,
+    "ParkF": 1,
+}
+
 TF_MAP = {"StrategyD": "30m", "GoldenCombo": "1D", "ACMTS": "1h", "ParkF": "1h"}
-PRIORITY = {"StrategyD": 4, "GoldenCombo": 3, "ACMTS": 2, "ParkF": 1}
 
 
 # ============================================================
@@ -149,7 +178,8 @@ def send_telegram(text: str) -> bool:
 
 def format_new_trade(sym, sig, margin, balance):
     emoji = "🟢" if sig["side"] == "LONG" else "🔴"
-    tf = TF_MAP.get(sig["strategy"], "1h")
+    # تایم‌فریم از سیگنال یا TF_MAP
+    tf = sig.get("_tf_label") or TF_MAP.get(sig["strategy"], "1h")
     rr = sig["tp_pct"] / sig["sl_pct"] if sig["sl_pct"] > 0 else 0
     return (
         f"{emoji} <b>معامله جدید: {sym} {sig['side']}</b>\n"
@@ -166,9 +196,11 @@ def format_new_trade(sym, sig, margin, balance):
 
 def format_closed_trade(trade):
     emoji = "✅" if trade["pnl_pct"] > 0 else "❌"
+    tf = trade.get("tf", TF_MAP.get(trade["strategy"], "1h"))
     return (
         f"{emoji} <b>معامله بسته شد: {trade['symbol']} {trade['side']}</b>\n"
-        f"🧠 استراتژی: <b>{trade['strategy']}</b>\n\n"
+        f"🧠 استراتژی: <b>{trade['strategy']}</b>\n"
+        f"📊 تایم‌فریم: <b>{tf}</b>\n\n"
         f"📍 قیمت ورود: <code>{fmt_price(trade['entry'])}</code>\n"
         f"🏁 قیمت خروج: <code>{fmt_price(trade['exit'])}</code>\n"
         f"📊 سود/ضرر: <b>{trade['pnl_pct']:+.2f}%</b>\n"
@@ -183,7 +215,7 @@ def format_strategy_summary(log_data):
     df = pd.DataFrame(closed)
     report = "📈 <b>گزارش بازدهی استراتژی‌ها:</b>\n\n"
 
-    for strat in ["StrategyD", "GoldenCombo", "ACMTS", "ParkF"]:
+    for strat in ["StrategyD", "GoldenCombo", "COV-Pivot1", "ACMTS", "ParkF"]:
         strat_df = df[df["strategy"] == strat]
         if strat_df.empty:
             report += f"<b>🔹 {strat}</b>: هنوز معامله‌ای ندارد.\n\n"
@@ -214,19 +246,9 @@ def get_klines(symbol, interval):
     return r.json()
 
 
-def get_klines_30m(symbol):
-    for interval in ("30", "30m", "M30"):
-        try:
-            k = get_klines(symbol, interval)
-            if k and len(k) >= 50:
-                return k
-        except Exception:
-            continue
-    return None
-
-
-def get_daily_klines(symbol):
-    for interval in ("1440", "D", "1d", "1D", "day"):
+def get_klines_fallback(symbol, intervals):
+    """اولین فرمت interval که کار کند را برمی‌گرداند."""
+    for interval in intervals:
         try:
             k = get_klines(symbol, interval)
             if k and len(k) >= 50:
@@ -282,7 +304,7 @@ def save_log(log):
 
 
 # ============================================================
-# INDICATORS (shared)
+# INDICATORS
 # ============================================================
 def compute_atr(df, length=14):
     h, l, c = df["high"].values, df["low"].values, df["close"].values
@@ -445,6 +467,26 @@ def sd_supertrend(high, low, close, period, mult):
         else:
             trend[i] = 1 if close[i] > fu[i] else -1
     return trend
+
+
+# --- COV-Pivot1 indicators ---
+def cov_compute_cov(c, n, m):
+    """بازگشت: (up_begins, is_ranging, downtrend)"""
+    sma = c.rolling(int(n)).mean()
+    std = c.rolling(int(n)).std(ddof=0)
+    cov = std / sma.replace(0, np.nan)
+    med = cov.rolling(int(m)).median()
+    is_r = cov < med
+    up = (c > sma) & (~is_r)
+    dn = (c < sma) & (~is_r)
+    up_beg = (up & is_r.shift(1).fillna(False)).fillna(False)
+    return up_beg, is_r, dn
+
+
+def cov_atr(df, period=5):
+    h = df["high"]; l = df["low"]; c = df["close"]
+    tr = np.maximum(h - l, np.maximum((h - c.shift()).abs(), (l - c.shift()).abs()))
+    return tr.rolling(int(period)).mean()
 
 
 # ============================================================
@@ -628,18 +670,6 @@ def detect_golden_combo(df_daily):
 # STRATEGY 4: Strategy D (30m, SHORT only)
 # ============================================================
 def detect_strategy_d(df_30m):
-    """
-    Strategy D (Config D Final Winner) — SHORT only, 30m.
-
-    5 filters (all must align at last closed bar):
-      - RSI(2) < last_pivot(4) - 6.5
-      - close < Kijun(42)
-      - QQE(10,6) flipped bullish->bearish on this bar
-      - ATR_ratio(200) >= 0.9
-      - SuperTrend(10, 3.0) = downtrend
-
-    SL = 2.25 * ATR, TP = 4.0 * R.
-    """
     P = SD_PARAMS
     n = len(df_30m)
     if n < P["min_bars"]:
@@ -697,12 +727,84 @@ def detect_strategy_d(df_30m):
 
 
 # ============================================================
+# STRATEGY 5: COV-Pivot1 (Dual COV OR + Pivot1) — LONG only, multi-TF
+# ============================================================
+def detect_cov_pivot1(df, tf_label):
+    """
+    ورود LONG اگر همه شرایط برقرار باشد:
+      - (COV1_up OR COV2_up) — یکی از دو رژیم شکست
+      - Pivot1_ok — قیمت بالای آخرین سقف محلی (10-bar)
+      - NOT is_ranging — نه در رنج (COV1 و COV2)
+      - NOT downtrend — نه نزولی (COV1 و COV2)
+
+    SL = entry - 2.0 × ATR(5)
+    TP = entry + 2R (اضافه شده برای MarginPad)
+    """
+    P = COV_PARAMS
+    n = len(df)
+    if n < P["min_bars"]:
+        return None
+
+    close_s = df["close"]
+    high_s = df["high"]
+
+    # COV1 (slow: 21/120)
+    up1, is_r1, dn1 = cov_compute_cov(close_s, P["cov1_n"], P["cov1_m"])
+    # COV2 (fast: 5/500)
+    up2, is_r2, dn2 = cov_compute_cov(close_s, P["cov2_n"], P["cov2_m"])
+
+    # Pivot1 (10-bar high)
+    ph1 = compute_pivot_high(high_s, P["pivot1_p"])
+    piv1_ok = (close_s > high_s.where(ph1).ffill()).fillna(False)
+
+    atr_series = cov_atr(df, P["atr_p"])
+
+    i = n - 2
+    if i < P["min_bars"] - 1:
+        return None
+
+    price = float(close_s.iloc[i])
+
+    c_cov1 = bool(up1.iloc[i] or up1.iloc[i-1])
+    c_cov2 = bool(up2.iloc[i] or up2.iloc[i-1])
+    c_pivot = bool(piv1_ok.iloc[i])
+    is_ranging = bool(is_r1.iloc[i] and is_r2.iloc[i])
+    is_dn = bool(dn1.iloc[i] and dn2.iloc[i])
+
+    if not ((c_cov1 or c_cov2) and c_pivot and not is_ranging and not is_dn):
+        return None
+
+    atr_val = atr_series.iloc[i]
+    if pd.isna(atr_val) or float(atr_val) <= 0:
+        return None
+
+    sl = price - P["sl_mult"] * float(atr_val)
+    sl_dist = price - sl
+    if sl_dist <= 0:
+        return None
+
+    tp = price + P["tp_rr"] * sl_dist
+    sl_pct = sl_dist / price * 100
+    tp_pct = (tp - price) / price * 100
+
+    if not (0 < sl_pct < 15):
+        return None
+
+    return {
+        "strategy": "COV-Pivot1", "side": "LONG",
+        "entry": price, "sl": sl, "tp": tp,
+        "sl_pct": sl_pct, "tp_pct": tp_pct,
+        "_tf_label": tf_label,
+    }
+
+
+# ============================================================
 # MAIN
 # ============================================================
 def run_scan() -> int:
     now = datetime.now(timezone.utc)
     print("=" * 70)
-    print(f"Winning Combo Scan (4 strategies) — {now.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"Winning Combo Scan (5 strategies) — {now.strftime('%Y-%m-%d %H:%M UTC')}")
     print("=" * 70)
 
     log = load_log()
@@ -738,7 +840,8 @@ def run_scan() -> int:
 
                 closed_record = {
                     "symbol": sym, "strategy": entry_info["strategy"], "side": side,
-                    "entry": entry_price, "exit": current_price, "pnl_pct": round(pnl, 2)
+                    "entry": entry_price, "exit": current_price, "pnl_pct": round(pnl, 2),
+                    "tf": entry_info.get("tf", TF_MAP.get(entry_info["strategy"], "1h")),
                 }
                 log["closed_trades"].append(closed_record)
                 newly_closed.append(closed_record)
@@ -753,12 +856,10 @@ def run_scan() -> int:
         if sym in open_positions:
             continue
 
-        # global position cap
         if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
             print(f"  Max total positions ({MAX_TOTAL_POSITIONS}) reached — stopping")
             break
 
-        # 1h data (ACMTS + ParkF + price validation)
         try:
             k1h = get_klines(sym, "60")
             df_1h = klines_to_df(k1h[-300:])
@@ -767,9 +868,9 @@ def run_scan() -> int:
 
         signals = []
 
-        # ✅ Priority 4: StrategyD (30m, SHORT only)
+        # Priority 4: StrategyD (30m, SHORT only)
         try:
-            k30_raw = get_klines_30m(sym)
+            k30_raw = get_klines_fallback(sym, ["30", "30m", "M30"])
             if k30_raw:
                 df_30m = klines_to_df(k30_raw[-500:])
                 s = detect_strategy_d(df_30m)
@@ -780,12 +881,36 @@ def run_scan() -> int:
 
         # Priority 3: GoldenCombo (1D, LONG only)
         try:
-            k1d_raw = get_daily_klines(sym)
+            k1d_raw = get_klines_fallback(sym, ["1440", "D", "1d", "1D", "day"])
             if k1d_raw:
                 df_1d = klines_to_df(k1d_raw[-500:])
                 s = detect_golden_combo(df_1d)
                 if s:
                     signals.append(s)
+        except Exception:
+            pass
+
+        # Priority 3 (tie): COV-Pivot1 (LONG only, multi-TF — highest TF wins)
+        try:
+            best_cov = None
+            best_cov_tf_prio = -1
+            for tf_label, interval_variants, tf_prio in COV_TIMEFRAMES:
+                try:
+                    k_raw = get_klines_fallback(sym, interval_variants)
+                    if not k_raw:
+                        continue
+                    needed = COV_PARAMS["min_bars"] + 20
+                    if len(k_raw) < needed:
+                        continue
+                    df_tf = klines_to_df(k_raw[-needed:])
+                    s = detect_cov_pivot1(df_tf, tf_label)
+                    if s and tf_prio > best_cov_tf_prio:
+                        best_cov = s
+                        best_cov_tf_prio = tf_prio
+                except Exception:
+                    continue
+            if best_cov:
+                signals.append(best_cov)
         except Exception:
             pass
 
@@ -810,7 +935,7 @@ def run_scan() -> int:
         if not signals:
             continue
 
-        # --- Conflict detection: opposite directions = skip ---
+        # Conflict detection
         if len(signals) > 1:
             sides = set(s["side"] for s in signals)
             if len(sides) > 1:
@@ -820,13 +945,14 @@ def run_scan() -> int:
 
         sig = pick_best_signal(signals)
 
-        # --- Global quality gate ---
+        # Quality gate
         ok, reason = is_signal_ok(sig)
         if not ok:
-            print(f"  [{sym}] SKIP signal ({sig['strategy']}): {reason}")
+            tf_show = sig.get("_tf_label", TF_MAP.get(sig["strategy"], "1h"))
+            print(f"  [{sym}] SKIP signal ({sig['strategy']} {tf_show}): {reason}")
             continue
 
-        # --- Live price validation ---
+        # Live price validation
         try:
             current_price = float(k1h[-1]["close"])
         except Exception:
@@ -852,7 +978,7 @@ def run_scan() -> int:
             print(f"  [{sym}] SKIP: SL/TP too close to current price")
             continue
 
-        # --- Sizing ---
+        # Sizing
         risk_amount = balance_usd * RISK_PCT_PER_TRADE
         sl_frac = sig["sl_pct"] / 100.0
         if sl_frac <= 0:
@@ -876,22 +1002,22 @@ def run_scan() -> int:
         if resp.get("idempotent"):
             continue
 
+        tf_saved = sig.get("_tf_label", TF_MAP.get(sig["strategy"], "1h"))
         log["open_entries"][sym] = {
             "strategy": sig["strategy"], "side": sig["side"], "entry": sig["entry"],
-            "sl": sig["sl"], "tp": sig["tp"], "margin": margin
+            "sl": sig["sl"], "tp": sig["tp"], "margin": margin, "tf": tf_saved,
         }
         new_trades.append((sym, sig, margin))
 
         emoji = "🟢" if sig["side"] == "LONG" else "🔴"
         capped = " [capped]" if notional < notional_raw else ""
-        tf = TF_MAP.get(sig["strategy"], "1h")
         rr = sig["tp_pct"] / sig["sl_pct"] if sig["sl_pct"] > 0 else 0
-        print(f"  {emoji} [{sig['strategy']} {tf}] {sig['side']} {sym} @ {fmt_price(sig['entry'])} "
+        print(f"  {emoji} [{sig['strategy']} {tf_saved}] {sig['side']} {sym} @ {fmt_price(sig['entry'])} "
               f"| R/R {rr:.2f} | Margin: ${margin:.2f}{capped}")
 
     save_log(log)
 
-    # --- Telegram ---
+    # Telegram
     msg_blocks = []
     if new_trades:
         msg_blocks.append(f"<b>🔔 معاملات جدید — {now.strftime('%H:%M')} UTC</b>")
