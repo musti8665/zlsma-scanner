@@ -40,4 +40,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: auto-update trade log [skip ci]"
-          file_pattern: "marginpad_trades_log.json paper_ledger.csv"
+          file_pattern: "marginpad_trades_log.csv"
