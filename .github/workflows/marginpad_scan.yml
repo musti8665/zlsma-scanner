@@ -31,13 +31,13 @@ jobs:
           MARGINPAD_API_KEY: ${{ secrets.MARGINPAD_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TG_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT }}
-          DAILY_PAPER_MODE: "true"     # فعلا روی پیپر (مجازی) باشه
-          INTERVAL_MIN: "0"            # 👈 این خط خیلی مهمه! میگه فقط یک بار اجرا کن و نخواب
+          DAILY_PAPER_MODE: "false"    # 👈 این خط true بود، الان false شد تا معاملات واقعی باز بشن
+          INTERVAL_MIN: "0"            
         run: python acmts_scanner.py
 
       - name: Commit and save trade logs
-        if: always() # حتی اگر ربات ارور داد، لاگ‌ها رو ذخیره کن
+        if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: auto-update trade log [skip ci]"
-          file_pattern: "marginpad_trades_log.csv"
+          file_pattern: "marginpad_trades_log.json" # 👈 این خط csv بود، الان json شد
