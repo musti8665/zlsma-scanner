@@ -3,19 +3,8 @@
 """
 MarginPad Dual-Strategy Scanner — Donchian + DailyMACD
 ========================================================
-VolTarget REMOVED (WF Sharpe mean=0.11, std=2.06 — coin flip).
-
-Active strategies:
-  DailyMACD  (1d)      ✅ PRIMARY   WF mean=1.79, std=0.99 — stable
-  Donchian   (5m-4h)   ⚠️  SMALL    WF mean=1.88, std=2.18 — volatile
-
-Loop mode: هر ۳۰ دقیقه یک بار اسکن می‌کند (بدون نیاز به cron).
-
-Kill switch pauses new entries if:
-  • 3 consecutive DailyMACD losses with total < -15%, OR
-  • DailyMACD drawdown > 20%
-
-Paper ledger written to paper_ledger.csv
+VolTarget REMOVED.
+Loop mode: هر ۳۰ دقیقه یک بار اسکن می‌کند.
 """
 
 import os
@@ -29,15 +18,9 @@ import pandas as pd
 from datetime import datetime, timezone
 from pathlib import Path
 
-# ============================================================
-# STRATEGY TOGGLES
-# ============================================================
 ENABLE_DONCHIAN = True
 ENABLE_DAILY    = True
 
-# ============================================================
-# RISK PROFILES (used by DailyMACD Vol-Targeting sizing)
-# ============================================================
 PROFILES = {
     "conservative": {"name": "🛡️ محافظه‌کار", "target_vol": 0.20,
                      "size_min": 0.10, "size_max": 0.60},
@@ -55,27 +38,18 @@ DAILY_PROFILE = PROFILES[DAILY_PROFILE_KEY]
 VOL_FLOOR = 0.15
 VOL_CEIL  = 0.80
 
-# ============================================================
-# DONCHIAN PROFILES
-# ============================================================
 DONCHIAN_PROFILES = {
     "spot_safe": {"name": "🛡 Spot-safe", "sf": 0.25, "leverage": 1.0},
     "lev_2x":    {"name": "⚡ 2x Lev",    "sf": 0.50, "leverage": 1.5},
     "lev_3x":    {"name": "🚀 3x Lev",    "sf": 0.75, "leverage": 2.25},
 }
-ACTIVE_DONCHIAN_PROFILE_KEY = "spot_safe"   # FORCED — do not use leverage
+ACTIVE_DONCHIAN_PROFILE_KEY = "spot_safe"
 ACTIVE_DONCHIAN_PROFILE = DONCHIAN_PROFILES[ACTIVE_DONCHIAN_PROFILE_KEY]
 
-# ============================================================
-# DAILY MACD CONFIG
-# ============================================================
 DAILY_PAPER_MODE = os.environ.get("DAILY_PAPER_MODE", "true").lower() == "true"
-DAILY_EXIT_MODE  = os.environ.get("DAILY_EXIT_MODE", "macd").lower()  # "macd" | "kijun"
+DAILY_EXIT_MODE  = os.environ.get("DAILY_EXIT_MODE", "macd").lower()
 DAILY_COOLDOWN_HOURS = 30
 
-# ============================================================
-# ENV
-# ============================================================
 API_KEY = os.environ.get("MARGINPAD_API_KEY", "mpb_d04c938486b9f5e711f9a736084fa9b5").strip()
 TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo").strip()
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
@@ -88,9 +62,6 @@ BASE = "https://marginpad.io/api/bot/v1"
 HEADERS = {"X-API-Key": API_KEY}
 H_JSON = {**HEADERS, "Content-Type": "application/json"}
 
-# ============================================================
-# SYMBOLS
-# ============================================================
 SYMBOLS = [
     "ADA", "AVAX", "LINK", "LTC",
     "ENA", "ATOM", "NEAR", "ARB", "OP", "PEPE", "SHIB", "SUI",
@@ -99,9 +70,6 @@ SYMBOLS = [
 DONCHIAN_SYMBOLS = sorted(set(SYMBOLS + ["BTC", "ETH", "SOL"]))
 DAILY_SYMBOLS    = SYMBOLS
 
-# ============================================================
-# PARAMS
-# ============================================================
 DONCHIAN_PARAMS = {
     "entry_n": 8, "exit_n": 2,
     "vol_mult": 1.5, "atr_mult": 3.0, "ema_period": 150,
@@ -128,9 +96,6 @@ SCAN_TIMEFRAMES = [
 ]
 DAILY_TIMEFRAMES = [("1d", ["1440", "1d", "D", "D1"], 1, 365)]
 
-# ============================================================
-# LIMITS
-# ============================================================
 LEVERAGE = 10
 MAX_DONCHIAN_POSITIONS = 3
 MAX_DAILY_POSITIONS    = 5
@@ -140,34 +105,30 @@ MAX_NOTIONAL_PCT = 0.75
 LOG_FILE = Path("marginpad_trades_log.json")
 LEDGER_FILE = Path("paper_ledger.csv")
 
-# Kill switch thresholds
 KILL_CONSEC_LOSSES    = 3
 KILL_CONSEC_LOSS_SUM  = -15.0
 KILL_MAX_DRAWDOWN     = -20.0
 KILL_SILENCE_DAYS     = 10
 
-# ============================================================
-# FILTER THRESHOLDS
-# ============================================================
 FILTERS_DONCHIAN = {"min_sl": 0.5, "min_tp": 0.3, "min_rr": 0.5}
 FILTERS_DAILY    = {"min_sl": 0.5, "min_tp": 1.0, "min_rr": 1.5}
 
-# ============================================================
-# HELPERS
-# ============================================================
-def fmt_price(p: float) -> str:
+
+def fmt_price(p):
     if p >= 1000:   return f"{p:.2f}"
     if p >= 1:      return f"{p:.4f}"
     if p >= 0.01:   return f"{p:.6f}"
     if p >= 0.0001: return f"{p:.8f}"
     return f"{p:.10f}".rstrip('0')
 
-def round_price(price: float, ref_price: float) -> float:
+
+def round_price(price, ref_price):
     s = f"{ref_price:.10f}".rstrip("0")
     dec = min(len(s.split(".")[1]), 8) if "." in s else 0
     return round(price, dec)
 
-def is_signal_ok(sig, filters) -> tuple:
+
+def is_signal_ok(sig, filters):
     if sig["sl_pct"] < filters["min_sl"]:
         return False, f"SL too tight ({sig['sl_pct']:.2f}%)"
     if sig["tp_pct"] < filters["min_tp"]:
@@ -177,12 +138,14 @@ def is_signal_ok(sig, filters) -> tuple:
         return False, f"R/R too low ({rr:.2f})"
     return True, ""
 
-def compute_dynamic_size(vol30: float, profile: dict) -> float:
+
+def compute_dynamic_size(vol30, profile):
     if np.isnan(vol30) or vol30 <= 0:
         return profile["target_vol"]
     clamped = max(VOL_FLOOR, min(VOL_CEIL, vol30))
     dyn = profile["target_vol"] / clamped
     return max(profile["size_min"], min(profile["size_max"], dyn))
+
 
 def hours_since_last_entry(log, log_key, current_bar_ts):
     last = log.get("last_entry_bar", {}).get(log_key)
@@ -190,13 +153,12 @@ def hours_since_last_entry(log, log_key, current_bar_ts):
         return 999999
     return (current_bar_ts - last) / 3600
 
+
 def record_entry_bar(log, log_key, bar_ts):
     log.setdefault("last_entry_bar", {})[log_key] = int(bar_ts)
 
-# ============================================================
-# TELEGRAM
-# ============================================================
-def send_telegram(text: str) -> bool:
+
+def send_telegram(text):
     if not TG_TOKEN or not TG_CHAT:
         return False
     try:
@@ -215,14 +177,15 @@ def send_telegram(text: str) -> bool:
         print(f"  [telegram] error: {e}")
         return False
 
+
 def _sizes_block_risk(vol30, active_key):
-    """Display all 3 risk profile sizes (used by DailyMACD)."""
     block = "\n📐 <b>سایز ۳ پروفایل:</b>\n"
     for k, p in PROFILES.items():
         d = compute_dynamic_size(vol30, p)
         marker = " ← اجرا شد" if k == active_key else ""
         block += f"  • {p['name']}: <b>{d*100:.1f}%</b>{marker}\n"
     return block
+
 
 def _sizes_block_donchian(balance, active_key):
     block = "\n📐 <b>سایز ۳ پروفایل:</b>\n"
@@ -232,6 +195,7 @@ def _sizes_block_donchian(balance, active_key):
         block += (f"  • {p['name']}: <b>{p['sf']*100:.0f}%</b> "
                   f"(${usd:,.0f}, {p['leverage']}×){marker}\n")
     return block
+
 
 def format_donchian_trade(sym, sig, notional, margin, balance, profile_key, profile):
     side = sig["side"]
@@ -255,6 +219,7 @@ def format_donchian_trade(sym, sig, notional, margin, balance, profile_key, prof
         f"ℹ️ خروج اصلی: {exit_desc}\n"
     )
 
+
 def format_daily_trade(sym, sig, notional, margin, balance, profile_key, profile):
     side = sig["side"]
     emoji = "🟢" if side == "LONG" else "🔴"
@@ -277,6 +242,7 @@ def format_daily_trade(sym, sig, notional, margin, balance, profile_key, profile
         f"⏱ Cooldown: {DAILY_COOLDOWN_HOURS}h\n"
     )
 
+
 def format_closed_trade(trade):
     emoji = "✅" if trade["pnl_pct"] > 0 else "❌"
     strategy = trade.get("strategy", "Unknown")
@@ -290,6 +256,7 @@ def format_closed_trade(trade):
         f"🏁 خروج: <code>{fmt_price(trade['exit'])}</code>\n"
         f"📊 سود/ضرر: <b>{trade['pnl_pct']:+.2f}%</b>\n"
     )
+
 
 def format_strategy_summary(log_data, strategy, title):
     closed = [t for t in log_data.get("closed_trades", []) if t.get("strategy") == strategy]
@@ -322,11 +289,8 @@ def format_strategy_summary(log_data, strategy, title):
         report += f"🔴 SHORT: {len(short_df)} — وین‌ریت {s_wr:.0f}%\n"
     return report
 
-# ============================================================
-# KILL SWITCH + HEALTH CHECK + LEDGER
-# ============================================================
+
 def check_kill_switch(log):
-    """Returns (triggered: bool, reason: str)."""
     closed = log.get("closed_trades", [])
     if not closed:
         return False, ""
@@ -350,8 +314,8 @@ def check_kill_switch(log):
 
     return False, ""
 
+
 def check_health(log):
-    """Returns warning string or None."""
     last_entry = log.get("last_entry_bar", {})
     if not last_entry:
         return None
@@ -360,6 +324,7 @@ def check_health(log):
     if age_days > KILL_SILENCE_DAYS:
         return f"⚠️ هیچ سیگنال جدیدی در {age_days:.0f} روز گذشته"
     return None
+
 
 def log_ledger(date_str, strategy, opened, closed, balance):
     header = not LEDGER_FILE.exists()
@@ -372,13 +337,12 @@ def log_ledger(date_str, strategy, opened, closed, balance):
     except Exception as e:
         print(f"  [ledger] write error: {e}")
 
-# ============================================================
-# API
-# ============================================================
+
 def get_klines(symbol, interval):
     r = requests.get(f"{BASE}/klines?symbol={symbol}&interval={interval}", timeout=15)
     r.raise_for_status()
     return r.json()
+
 
 def get_klines_fallback(symbol, intervals):
     for interval in intervals:
@@ -390,15 +354,18 @@ def get_klines_fallback(symbol, intervals):
             continue
     return None
 
+
 def get_positions():
     r = requests.get(f"{BASE}/positions?status=open", headers=HEADERS, timeout=15)
     r.raise_for_status()
     return {p["symbol"]: p for p in r.json().get("positions", [])}
 
+
 def get_balance():
     r = requests.get(f"{BASE}/balance", headers=HEADERS, timeout=15)
     r.raise_for_status()
     return r.json()
+
 
 def open_position(symbol, side, margin, leverage, sl, tp, coid):
     body = {"symbol": symbol, "side": side, "margin_usd": round(margin, 2),
@@ -412,6 +379,7 @@ def open_position(symbol, side, margin, leverage, sl, tp, coid):
         print(f"  [{symbol}] HTTP {r.status_code} — error: {err}")
         return None
     return r.json()
+
 
 def close_position(pos_dict):
     if not pos_dict:
@@ -430,9 +398,7 @@ def close_position(pos_dict):
             continue
     return None
 
-# ============================================================
-# LOG
-# ============================================================
+
 def load_log():
     if LOG_FILE.exists():
         try:
@@ -442,26 +408,28 @@ def load_log():
     return {"open_entries": {}, "closed_trades": [], "last_entry_bar": {},
             "kill_switch": None}
 
+
 def save_log(log):
     LOG_FILE.write_text(json.dumps(log, indent=2, default=str))
 
-# ============================================================
-# INDICATORS
-# ============================================================
+
 def compute_atr(df, length=14):
     h, l, c = df["high"].values, df["low"].values, df["close"].values
     tr = np.maximum(h - l, np.maximum(np.abs(h - np.roll(c, 1)), np.abs(l - np.roll(c, 1))))
     tr[0] = h[0] - l[0]
     return pd.Series(tr).ewm(alpha=1/length, adjust=False).mean().values
 
+
 def klines_to_df(klines):
     df = pd.DataFrame(klines)
     df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
     return df.set_index("time").sort_index()
 
+
 def compute_vol30(df, bars_per_year):
     ret = df["close"].pct_change()
     return ret.rolling(DAILY_MACD_PARAMS["vol_period"]).std() * np.sqrt(bars_per_year)
+
 
 def check_kijun_exit(df, side, kijun_p=20):
     if len(df) < kijun_p + 3:
@@ -472,18 +440,20 @@ def check_kijun_exit(df, side, kijun_p=20):
     last_kijun = float(kijun.iloc[-1])
     if np.isnan(last_kijun):
         return False
-    if side == "LONG" and last_close < last_kijun: return True
-    if side == "SHORT" and last_close > last_kijun: return True
+    if side == "LONG" and last_close < last_kijun:
+        return True
+    if side == "SHORT" and last_close > last_kijun:
+        return True
     return False
 
-# ============================================================
-# STRATEGY A: Donchian Breakout (LONG + SHORT)
-# ============================================================
+
 def detect_donchian_signals(df, tf_label):
     P = DONCHIAN_PARAMS
     n = len(df)
-    if n < P["min_bars"]: return []
-    if "volume" not in df.columns: return []
+    if n < P["min_bars"]:
+        return []
+    if "volume" not in df.columns:
+        return []
 
     close, high, low, volume = df["close"], df["high"], df["low"], df["volume"]
 
@@ -501,19 +471,658 @@ def detect_donchian_signals(df, tf_label):
 
     for offset in (2, 3):
         i = n - offset
-        if i < P["min_bars"]: continue
-        if pd.isna(don_hi_entry.iloc[i]) or pd.isna(don_lo_entry.iloc[i]): continue
-        if pd.isna(atr.iloc[i]) or pd.isna(ema.iloc[i]) or pd.isna(vol_ma.iloc[i]): continue
+        if i < P["min_bars"]:
+            continue
+        if pd.isna(don_hi_entry.iloc[i]) or pd.isna(don_lo_entry.iloc[i]):
+            continue
+        if pd.isna(atr.iloc[i]) or pd.isna(ema.iloc[i]) or pd.isna(vol_ma.iloc[i]):
+            continue
 
         atr_val = float(atr.iloc[i])
-        if atr_val <= 0: continue
+        if atr_val <= 0:
+            continue
         close_v = float(close.iloc[i])
         ema_v = float(ema.iloc[i])
         vol_ok = float(volume.iloc[i]) > P["vol_mult"] * float(vol_ma.iloc[i])
-        try: bar_ts = int(pd.Timestamp(df.index[i]).timestamp())
-        except Exception: bar_ts = None
+        try:
+            bar_ts = int(pd.Timestamp(df.index[i]).timestamp())
+        except Exception:
+            bar_ts = None
 
         sigs = []
         if close_v < float(don_lo_exit.iloc[i]):
             sigs.append({"action": "EXIT_LONG", "side": "LONG", "entry": close_v,
-                         "_tf_label": tf_
+                         "_tf_label": tf_label, "_bar_ts": bar_ts})
+        if close_v > float(don_hi_exit.iloc[i]):
+            sigs.append({"action": "EXIT_SHORT", "side": "SHORT", "entry": close_v,
+                         "_tf_label": tf_label, "_bar_ts": bar_ts})
+
+        if close_v > float(don_hi_entry.iloc[i]) and vol_ok and close_v > ema_v:
+            sl_price = close_v - P["atr_mult"] * atr_val
+            sl_dist = close_v - sl_price
+            if sl_dist > 0:
+                tp_price = close_v + P["tp_rr"] * sl_dist
+                sl_pct = sl_dist / close_v * 100
+                tp_pct = (tp_price - close_v) / close_v * 100
+                if 0 < sl_pct < 25:
+                    sigs.append({"action": "ENTRY_LONG", "side": "LONG",
+                                 "entry": close_v, "sl": sl_price, "tp": tp_price,
+                                 "sl_pct": sl_pct, "tp_pct": tp_pct,
+                                 "_tf_label": tf_label, "_bar_ts": bar_ts,
+                                 "_atr": atr_val})
+
+        if close_v < float(don_lo_entry.iloc[i]) and vol_ok and close_v < ema_v:
+            sl_price = close_v + P["atr_mult"] * atr_val
+            sl_dist = sl_price - close_v
+            if sl_dist > 0:
+                tp_price = close_v - P["tp_rr"] * sl_dist
+                sl_pct = sl_dist / close_v * 100
+                tp_pct = (close_v - tp_price) / close_v * 100
+                if 0 < sl_pct < 25:
+                    sigs.append({"action": "ENTRY_SHORT", "side": "SHORT",
+                                 "entry": close_v, "sl": sl_price, "tp": tp_price,
+                                 "sl_pct": sl_pct, "tp_pct": tp_pct,
+                                 "_tf_label": tf_label, "_bar_ts": bar_ts,
+                                 "_atr": atr_val})
+
+        if sigs:
+            return sigs
+    return []
+
+
+def detect_daily_macd_signals(df, tf_label, bars_per_year):
+    P = DAILY_MACD_PARAMS
+    n = len(df)
+    if n < P["min_bars"]:
+        return []
+
+    close, high, low = df["close"], df["high"], df["low"]
+    times = df.index
+
+    def _e(s, nn):
+        return s.ewm(span=nn, adjust=False).mean()
+
+    def _r(c, nn):
+        d = c.diff()
+        g = d.clip(lower=0)
+        l = -d.clip(upper=0)
+        ag = g.ewm(alpha=1/nn, adjust=False).mean()
+        al = l.ewm(alpha=1/nn, adjust=False).mean()
+        return 100 - 100/(1 + ag/al.replace(0, np.nan))
+
+    ml = _e(close, P["macd_fast"]) - _e(close, P["macd_slow"])
+    sg = _e(ml, P["macd_signal"])
+    ph = high.rolling(P["pivot_period"]).max()
+    pl = low.rolling(P["pivot_period"]).min()
+    pm = (ph + pl) / 2
+    rsi = _r(close, P["qqe_rsi"])
+    rma = _e(rsi, P["qqe_sf"])
+    atr = compute_atr(df)
+    vol30 = compute_vol30(df, bars_per_year)
+
+    crosses = []
+    for off in (2, 3):
+        i = n - off
+        if i < 1:
+            continue
+        cu = ml.iloc[i-1] <= sg.iloc[i-1] and ml.iloc[i] > sg.iloc[i]
+        cd = ml.iloc[i-1] >= sg.iloc[i-1] and ml.iloc[i] < sg.iloc[i]
+        try:
+            ts = int(pd.Timestamp(times[i]).timestamp())
+        except Exception:
+            ts = None
+        if cu:
+            crosses.append(("UP", i, ts))
+        if cd:
+            crosses.append(("DOWN", i, ts))
+
+    if not crosses:
+        return []
+    crosses.sort(key=lambda x: x[1], reverse=True)
+    direction, i, bar_ts = crosses[0]
+
+    av = float(atr[i])
+    if av <= 0:
+        return []
+    vv = float(vol30.iloc[i]) if not pd.isna(vol30.iloc[i]) else 0.30
+    entry = float(close.iloc[i])
+    out = []
+
+    if direction == "UP":
+        out.append({"action": "EXIT_SHORT", "side": "SHORT",
+                    "entry": entry, "_tf_label": tf_label, "_bar_ts": bar_ts})
+        if close.iloc[i] > pm.iloc[i] and rma.iloc[i] > 50:
+            sl = entry - P["sl_atr_mult"] * av
+            if sl > 0:
+                tp = entry + P["tp_rr"] * (entry - sl)
+                slp = (entry - sl) / entry * 100
+                tpp = (tp - entry) / entry * 100
+                if 0 < slp < 20:
+                    out.append({"action": "ENTRY_LONG", "side": "LONG",
+                                "entry": entry, "sl": sl, "tp": tp,
+                                "sl_pct": slp, "tp_pct": tpp,
+                                "_tf_label": tf_label, "_bar_ts": bar_ts,
+                                "_vol30": vv})
+    else:
+        out.append({"action": "EXIT_LONG", "side": "LONG",
+                    "entry": entry, "_tf_label": tf_label, "_bar_ts": bar_ts})
+        if close.iloc[i] < pm.iloc[i] and rma.iloc[i] < 50:
+            sl = entry + P["sl_atr_mult"] * av
+            if sl > 0:
+                tp = entry - P["tp_rr"] * (sl - entry)
+                slp = (sl - entry) / entry * 100
+                tpp = (entry - tp) / entry * 100
+                if 0 < slp < 20:
+                    out.append({"action": "ENTRY_SHORT", "side": "SHORT",
+                                "entry": entry, "sl": sl, "tp": tp,
+                                "sl_pct": slp, "tp_pct": tpp,
+                                "_tf_label": tf_label, "_bar_ts": bar_ts,
+                                "_vol30": vv})
+    return out
+
+
+def fetch_timeframes(sym, min_bars_needed, bars=500):
+    data = {}
+    for tf_label, intervals, _, _ in SCAN_TIMEFRAMES:
+        try:
+            k_raw = get_klines_fallback(sym, intervals)
+            if k_raw and len(k_raw) >= min_bars_needed:
+                data[tf_label] = klines_to_df(k_raw[-bars:])
+            else:
+                data[tf_label] = None
+        except Exception:
+            data[tf_label] = None
+    return data
+
+
+def fetch_daily(sym):
+    for interval in DAILY_TIMEFRAMES[0][1]:
+        try:
+            k = get_klines(sym, interval)
+            if k and len(k) >= DAILY_MACD_PARAMS["min_bars"]:
+                return klines_to_df(k[-300:])
+        except Exception:
+            continue
+    return None
+
+
+def run_scan():
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+    print("=" * 70)
+    print(f"Dual-Strategy Scan — {now.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"  Donchian: {'ON' if ENABLE_DONCHIAN else 'OFF'} "
+          f"(spot_safe, max {MAX_DONCHIAN_POSITIONS})")
+    print(f"  DailyMACD: {'ON' if ENABLE_DAILY else 'OFF'} "
+          f"({'PAPER' if DAILY_PAPER_MODE else 'LIVE'}, max {MAX_DAILY_POSITIONS})")
+    print("=" * 70)
+
+    log = load_log()
+
+    kill_on, kill_reason = check_kill_switch(log)
+    if kill_on:
+        print(f"\n{kill_reason}")
+        if log.get("kill_switch") is None:
+            log["kill_switch"] = kill_reason
+            save_log(log)
+            send_telegram(
+                f"🛑 <b>KILL SWITCH ACTIVATED</b>\n"
+                f"{kill_reason}\n\n"
+                f"<i>New entries paused. Manual review required.</i>"
+            )
+        kill_on = True
+    else:
+        if log.get("kill_switch"):
+            log["kill_switch"] = None
+            save_log(log)
+
+    health_warn = check_health(log)
+    if health_warn:
+        print(f"  {health_warn}")
+
+    try:
+        bal = get_balance()
+        balance_usd = float(bal.get("balance_usd", 10000))
+        print(f"Balance: ${balance_usd:,.2f}")
+    except Exception as e:
+        print(f"FATAL balance: {e}")
+        return 1
+
+    try:
+        open_positions = get_positions()
+        paper_open_n = sum(1 for v in log["open_entries"].values() if v.get("paper"))
+        print(f"Open (exchange): {len(open_positions)} | Paper: {paper_open_n}")
+        if open_positions:
+            print(f"  {list(open_positions.keys())}")
+    except Exception as e:
+        print(f"FATAL positions: {e}")
+        return 1
+
+    newly_closed = []
+    new_trades = []
+
+    def log_key_sym(log_key):
+        return log_key.split(":", 1)[-1]
+
+    def count_strategy_total(strategy):
+        return sum(1 for v in log["open_entries"].values()
+                   if v.get("strategy") == strategy)
+
+    # PHASE 1a: Donchian EXITS
+    if ENABLE_DONCHIAN:
+        for log_key in list(log["open_entries"].keys()):
+            info = log["open_entries"].get(log_key)
+            if not info or info.get("strategy") != "Donchian":
+                continue
+            sym = log_key_sym(log_key)
+            if sym not in open_positions:
+                continue
+            pos_side = info.get("side", "LONG")
+            entry_tf = info.get("tf", "1h")
+            try:
+                tf_intervals = ["60", "60m", "H1"]
+                for tf_label, intervals, _, _ in SCAN_TIMEFRAMES:
+                    if tf_label == entry_tf:
+                        tf_intervals = intervals
+                        break
+                k_raw = get_klines_fallback(sym, tf_intervals)
+                if not k_raw or len(k_raw) < DONCHIAN_PARAMS["min_bars"]:
+                    continue
+                df_tf = klines_to_df(k_raw[-500:])
+                signals = detect_donchian_signals(df_tf, entry_tf)
+                exit_action = f"EXIT_{pos_side}"
+                if not any(s["action"] == exit_action for s in signals):
+                    continue
+                if not close_position(open_positions[sym]):
+                    continue
+                k1h = get_klines(sym, "60")
+                price = float(k1h[-1]["close"])
+                ep = info["entry"]
+                pnl = ((price - ep) if pos_side == "LONG" else (ep - price)) / ep * 100
+                log["open_entries"].pop(log_key)
+                rec = {"symbol": sym, "strategy": "Donchian", "side": pos_side,
+                       "entry": ep, "exit": price, "pnl_pct": round(pnl, 2),
+                       "tf": entry_tf, "close_reason": f"Donchian-EXIT ({entry_tf})",
+                       "paper": False}
+                log["closed_trades"].append(rec)
+                newly_closed.append(rec)
+                open_positions.pop(sym, None)
+                print(f"  [CLOSED] Donchian {sym} {pos_side} -> {pnl:+.2f}%")
+            except Exception as e:
+                print(f"  [DN {sym}] exit error: {e}")
+
+    # PHASE 1b: DailyMACD EXITS
+    if ENABLE_DAILY:
+        for log_key in list(log["open_entries"].keys()):
+            info = log["open_entries"].get(log_key)
+            if not info or info.get("strategy") != "DailyMACD":
+                continue
+            sym = log_key_sym(log_key)
+            is_paper = info.get("paper", False)
+            if not is_paper and sym not in open_positions:
+                continue
+            pos_side = info.get("side", "LONG")
+            try:
+                df_1d = fetch_daily(sym)
+                if df_1d is None or len(df_1d) < DAILY_MACD_PARAMS["min_bars"]:
+                    continue
+                trig = False
+                reason = ""
+                if DAILY_EXIT_MODE == "macd":
+                    sigs = detect_daily_macd_signals(df_1d, "1d", 365)
+                    exit_action = f"EXIT_{pos_side}"
+                    if any(s["action"] == exit_action for s in sigs):
+                        trig = True
+                        reason = "MACD-EXIT (1d)"
+                elif DAILY_EXIT_MODE == "kijun":
+                    if check_kijun_exit(df_1d, pos_side, DAILY_MACD_PARAMS["kijun_p"]):
+                        trig = True
+                        reason = "KIJUN-EXIT (1d)"
+                if not trig:
+                    continue
+                if not is_paper:
+                    if not close_position(open_positions[sym]):
+                        continue
+                price = float(df_1d["close"].iloc[-1])
+                ep = info["entry"]
+                pnl = ((price - ep) if pos_side == "LONG" else (ep - price)) / ep * 100
+                log["open_entries"].pop(log_key)
+                rec = {"symbol": sym, "strategy": "DailyMACD", "side": pos_side,
+                       "entry": ep, "exit": price, "pnl_pct": round(pnl, 2),
+                       "tf": "1d", "close_reason": reason, "paper": is_paper}
+                log["closed_trades"].append(rec)
+                newly_closed.append(rec)
+                if not is_paper and sym in open_positions:
+                    open_positions.pop(sym, None)
+                tag = "[PAPER] " if is_paper else ""
+                print(f"  [CLOSED] {tag}DailyMACD {sym} {pos_side} -> {pnl:+.2f}%")
+            except Exception as e:
+                print(f"  [DM {sym}] exit error: {e}")
+
+    # PHASE 2: SL/TP auto-close
+    for log_key in list(log["open_entries"].keys()):
+        info = log["open_entries"].get(log_key)
+        if not info:
+            continue
+        sym = log_key_sym(log_key)
+        is_paper = info.get("paper", False)
+        strategy = info.get("strategy", "Unknown")
+        side = info.get("side", "LONG")
+        ep = info.get("entry", 0)
+        sl = info.get("sl", 0)
+        tp = info.get("tp", 0)
+        if ep <= 0:
+            continue
+
+        if not is_paper and sym not in open_positions:
+            try:
+                k = get_klines(sym, "60")
+                price = float(k[-1]["close"])
+                pnl = ((price - ep) if side == "LONG" else (ep - price)) / ep * 100
+                log["open_entries"].pop(log_key)
+                rec = {"symbol": sym, "strategy": strategy, "side": side,
+                       "entry": ep, "exit": price, "pnl_pct": round(pnl, 2),
+                       "tf": info.get("tf", "1h"), "close_reason": "SL/TP",
+                       "paper": False}
+                log["closed_trades"].append(rec)
+                newly_closed.append(rec)
+                print(f"  [CLOSED-AUTO] {strategy} {sym} {side} -> {pnl:+.2f}%")
+            except Exception as e:
+                print(f"  [{sym}] close calc error: {e}")
+            continue
+
+        if is_paper and sl > 0 and tp > 0:
+            try:
+                if strategy == "DailyMACD":
+                    k = get_klines_fallback(sym, DAILY_TIMEFRAMES[0][1])
+                else:
+                    k = get_klines(sym, "60")
+                if not k:
+                    continue
+                price = float(k[-1]["close"])
+                hit = False
+                reason = ""
+                if side == "LONG":
+                    if price <= sl:
+                        hit = True
+                        reason = "SL (paper)"
+                    elif price >= tp:
+                        hit = True
+                        reason = "TP (paper)"
+                else:
+                    if price >= sl:
+                        hit = True
+                        reason = "SL (paper)"
+                    elif price <= tp:
+                        hit = True
+                        reason = "TP (paper)"
+                if not hit:
+                    continue
+                pnl = ((price - ep) if side == "LONG" else (ep - price)) / ep * 100
+                log["open_entries"].pop(log_key)
+                rec = {"symbol": sym, "strategy": strategy, "side": side,
+                       "entry": ep, "exit": price, "pnl_pct": round(pnl, 2),
+                       "tf": info.get("tf", "1d"), "close_reason": reason,
+                       "paper": True}
+                log["closed_trades"].append(rec)
+                newly_closed.append(rec)
+                print(f"  [CLOSED-AUTO-PAPER] {strategy} {sym} {side} -> {pnl:+.2f}% ({reason})")
+            except Exception as e:
+                print(f"  [{strategy}-paper {sym}] SL/TP check error: {e}")
+
+    # PHASE 3: NEW ENTRIES
+    if kill_on:
+        print("\n  Entries skipped (kill switch active)")
+    else:
+        newly_opened_symbols = set()
+
+        # 3a. Donchian
+        if ENABLE_DONCHIAN:
+            for sym in DONCHIAN_SYMBOLS:
+                if sym in open_positions or sym in newly_opened_symbols:
+                    continue
+                if count_strategy_total("Donchian") + len([t for t in new_trades if t[0] == "Donchian"]) >= MAX_DONCHIAN_POSITIONS:
+                    print(f"  Max Donchian ({MAX_DONCHIAN_POSITIONS}) reached")
+                    break
+                if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
+                    print(f"  Max total ({MAX_TOTAL_POSITIONS}) reached")
+                    break
+
+                try:
+                    k1h = get_klines(sym, "60")
+                    if not k1h or len(k1h) < 5:
+                        continue
+                    current_price = float(k1h[-1]["close"])
+                except Exception:
+                    continue
+
+                tf_data = fetch_timeframes(sym, DONCHIAN_PARAMS["min_bars"] + 50, bars=500)
+                all_entries = []
+                for tf_label, _, tf_prio, _ in SCAN_TIMEFRAMES:
+                    df_tf = tf_data.get(tf_label)
+                    if df_tf is None:
+                        continue
+                    try:
+                        for s in detect_donchian_signals(df_tf, tf_label):
+                            if s["action"] in ("ENTRY_LONG", "ENTRY_SHORT"):
+                                s["_tf_prio"] = tf_prio
+                                all_entries.append(s)
+                    except Exception:
+                        continue
+
+                if not all_entries:
+                    continue
+                if len(set(s["side"] for s in all_entries)) > 1:
+                    continue
+
+                all_entries.sort(key=lambda x: x["_tf_prio"], reverse=True)
+                sig = all_entries[0]
+                ok, reason = is_signal_ok(sig, FILTERS_DONCHIAN)
+                if not ok:
+                    continue
+                if sig["side"] == "LONG":
+                    if not (sig["sl"] < current_price < sig["tp"]):
+                        continue
+                else:
+                    if not (sig["tp"] < current_price < sig["sl"]):
+                        continue
+                min_dist = current_price * 0.003
+                if abs(current_price - sig["sl"]) < min_dist or abs(current_price - sig["tp"]) < min_dist:
+                    continue
+
+                sf = ACTIVE_DONCHIAN_PROFILE["sf"]
+                lev = ACTIVE_DONCHIAN_PROFILE["leverage"]
+                notional = min(balance_usd * sf, balance_usd * MAX_NOTIONAL_PCT)
+                margin = max(notional / lev, 1.0)
+
+                coid = f"Donchian-{sig['side']}-{sym}-{int(now.timestamp())}"
+                sl_r = round_price(sig["sl"], sig["entry"])
+                tp_r = round_price(sig["tp"], sig["entry"])
+                side_lc = "long" if sig["side"] == "LONG" else "short"
+
+                try:
+                    resp = open_position(sym, side_lc, margin, lev, sl_r, tp_r, coid)
+                except Exception as e:
+                    print(f"  [DN {sym}] network error: {e}")
+                    continue
+                if resp is None or resp.get("idempotent"):
+                    continue
+
+                log["open_entries"][f"Donchian:{sym}"] = {
+                    "strategy": "Donchian", "side": sig["side"], "entry": sig["entry"],
+                    "sl": sig["sl"], "tp": sig["tp"], "margin": margin,
+                    "tf": sig["_tf_label"], "_bar_ts": sig.get("_bar_ts"),
+                    "profile": ACTIVE_DONCHIAN_PROFILE_KEY, "paper": False,
+                }
+                new_trades.append(("Donchian", sym, sig, notional, margin))
+                newly_opened_symbols.add(sym)
+                print(f"  [Donchian {sig['_tf_label']}] {sig['side']} {sym} "
+                      f"@ {fmt_price(sig['entry'])} | {sf*100:.0f}% spot")
+
+        # 3b. DailyMACD
+        if ENABLE_DAILY:
+            for sym in DAILY_SYMBOLS:
+                if not DAILY_PAPER_MODE and (sym in open_positions or sym in newly_opened_symbols):
+                    continue
+                if DAILY_PAPER_MODE and f"DailyMACD:{sym}" in log["open_entries"]:
+                    continue
+                if count_strategy_total("DailyMACD") + len([t for t in new_trades if t[0] == "DailyMACD"]) >= MAX_DAILY_POSITIONS:
+                    print(f"  Max DailyMACD ({MAX_DAILY_POSITIONS}) reached")
+                    break
+                if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
+                    print(f"  Max total ({MAX_TOTAL_POSITIONS}) reached")
+                    break
+
+                df_1d = fetch_daily(sym)
+                if df_1d is None:
+                    continue
+                try:
+                    current_price = float(df_1d["close"].iloc[-1])
+                except Exception:
+                    continue
+
+                try:
+                    sigs = detect_daily_macd_signals(df_1d, "1d", 365)
+                except Exception as e:
+                    print(f"  [DM {sym}] sig error: {e}")
+                    continue
+
+                entries = [s for s in sigs if s["action"].startswith("ENTRY_")]
+                if not entries:
+                    continue
+                sig = entries[0]
+                log_key = f"DailyMACD:{sym}"
+                bar_ts = sig.get("_bar_ts")
+                if bar_ts:
+                    elapsed = hours_since_last_entry(log, log_key, bar_ts)
+                    if elapsed < DAILY_COOLDOWN_HOURS:
+                        continue
+
+                ok, reason = is_signal_ok(sig, FILTERS_DAILY)
+                if not ok:
+                    continue
+                if sig["side"] == "LONG":
+                    if not (sig["sl"] < current_price < sig["tp"]):
+                        continue
+                else:
+                    if not (sig["tp"] < current_price < sig["sl"]):
+                        continue
+
+                size = compute_dynamic_size(sig.get("_vol30", 0), DAILY_PROFILE)
+                notional = min(balance_usd * size, balance_usd * MAX_NOTIONAL_PCT)
+                margin = max(notional / LEVERAGE, 1.0)
+
+                coid = f"DailyMACD-{sig['side']}-{sym}-{int(now.timestamp())}"
+                sl_r = round_price(sig["sl"], sig["entry"])
+                tp_r = round_price(sig["tp"], sig["entry"])
+                side_lc = "long" if sig["side"] == "LONG" else "short"
+
+                if DAILY_PAPER_MODE:
+                    print(f"  [PAPER] DailyMACD {sig['side']} {sym} @ {fmt_price(sig['entry'])}")
+                    resp = {"id": coid, "paper": True}
+                else:
+                    try:
+                        resp = open_position(sym, side_lc, margin, LEVERAGE, sl_r, tp_r, coid)
+                    except Exception as e:
+                        print(f"  [DM {sym}] network error: {e}")
+                        continue
+                    if resp is None or resp.get("idempotent"):
+                        continue
+
+                log["open_entries"][log_key] = {
+                    "strategy": "DailyMACD", "side": sig["side"], "entry": sig["entry"],
+                    "sl": sig["sl"], "tp": sig["tp"], "margin": margin,
+                    "tf": "1d", "_bar_ts": bar_ts,
+                    "profile": DAILY_PROFILE_KEY, "exit_mode": DAILY_EXIT_MODE,
+                    "paper": DAILY_PAPER_MODE,
+                }
+                if bar_ts:
+                    record_entry_bar(log, log_key, bar_ts)
+                new_trades.append(("DailyMACD", sym, sig, notional, margin))
+                if not DAILY_PAPER_MODE:
+                    newly_opened_symbols.add(sym)
+                tag = "[PAPER]" if DAILY_PAPER_MODE else ""
+                print(f"  {tag} [DailyMACD 1d] {sig['side']} {sym} @ {fmt_price(sig['entry'])}")
+
+    save_log(log)
+
+    # LEDGER
+    for strat in ["DailyMACD", "Donchian"]:
+        n_open = len([t for t in new_trades if t[0] == strat])
+        n_closed = len([t for t in newly_closed if t.get("strategy") == strat])
+        if n_open or n_closed:
+            log_ledger(today_str, strat, n_open, n_closed, balance_usd)
+
+    # TELEGRAM
+    msg_blocks = []
+
+    if kill_on:
+        msg_blocks.append(f"🛑 <b>KILL SWITCH: entries paused</b>\n{kill_reason}")
+
+    if health_warn:
+        msg_blocks.append(f"{health_warn}")
+
+    if new_trades:
+        dn_new = [t for t in new_trades if t[0] == "Donchian"]
+        dm_new = [t for t in new_trades if t[0] == "DailyMACD"]
+        if dn_new:
+            msg_blocks.append(
+                f"<b>🔔 Donchian — {now.strftime('%H:%M')} UTC</b>\n"
+                f"<i>{ACTIVE_DONCHIAN_PROFILE['name']} (spot only)</i>"
+            )
+            for _, sym, sig, notional, margin in dn_new:
+                msg_blocks.append(format_donchian_trade(sym, sig, notional, margin,
+                                                         balance_usd,
+                                                         ACTIVE_DONCHIAN_PROFILE_KEY,
+                                                         ACTIVE_DONCHIAN_PROFILE))
+        if dm_new:
+            tag = "📝 PAPER " if DAILY_PAPER_MODE else ""
+            msg_blocks.append(
+                f"<b>{tag}🔔 DailyMACD — {now.strftime('%H:%M')} UTC</b>\n"
+                f"<i>{DAILY_PROFILE['name']} | Exit: {DAILY_EXIT_MODE.upper()}</i>"
+            )
+            for _, sym, sig, notional, margin in dm_new:
+                msg_blocks.append(format_daily_trade(sym, sig, notional, margin,
+                                                      balance_usd, DAILY_PROFILE_KEY,
+                                                      DAILY_PROFILE))
+
+    if newly_closed:
+        msg_blocks.append(f"<b>🔒 بسته‌شده — {now.strftime('%H:%M')} UTC</b>")
+        for t in newly_closed:
+            msg_blocks.append(format_closed_trade(t))
+
+    if new_trades or newly_closed:
+        msg_blocks.append(format_strategy_summary(log, "DailyMACD", "📊 DailyMACD Stats"))
+        msg_blocks.append(format_strategy_summary(log, "Donchian",  "📊 Donchian Stats"))
+
+    if msg_blocks:
+        send_telegram("\n\n".join(msg_blocks))
+
+    print(f"\nResult: {len(new_trades)} new | {len(newly_closed)} closed"
+          f"{' | KILL SWITCH ACTIVE' if kill_on else ''}")
+    print("=" * 70)
+    return 0
+
+
+if __name__ == "__main__":
+    INTERVAL_MIN = 30
+
+    if INTERVAL_MIN <= 0:
+        sys.exit(run_scan())
+
+    interval_sec = INTERVAL_MIN * 60
+    print(f"Loop mode: every {INTERVAL_MIN} min (Ctrl+C to stop)")
+    while True:
+        try:
+            run_scan()
+        except KeyboardInterrupt:
+            print("\nStopped by user")
+            sys.exit(0)
+        except Exception as e:
+            print(f"WARNING: Scan crashed: {e}")
+        print(f"Sleeping {INTERVAL_MIN} min...")
+        try:
+            time.sleep(interval_sec)
+        except KeyboardInterrupt:
+            print("\nStopped by user")
+            sys.exit(0)
