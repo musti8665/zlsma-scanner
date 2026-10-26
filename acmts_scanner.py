@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MarginPad Pivot+QQE Scanner — LONG + SHORT
+MarginPad VolTarget Scanner — LONG + SHORT
 ================================================
 Strategy: MACD(6,19,2) + Pivot(8) + QQE(10,5)
-Direction: LONG + SHORT (flip on MACD cross)
+Sizing:   Vol Targeting (3 profiles: conservative/balanced/aggressive)
+Direction: LONG + SHORT (mirrored logic)
 Timeframes: 5m, 15m, 30m, 1h, 4h
-Exit: opposite MACD cross (manual /close) OR SL/TP
+Exit: opposite MACD cross OR SL/TP
 """
 
 import os
@@ -19,8 +20,34 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # ============================================================
-# CONFIG
+# CONFIG — سه پروفایل ریسک
 # ============================================================
+PROFILES = {
+    "conservative": {
+        "name": "🛡️ محافظه‌کار",
+        "target_vol": 0.20,
+        "size_min": 0.10, "size_max": 0.60,
+    },
+    "balanced": {
+        "name": "⭐ متعادل",
+        "target_vol": 0.30,
+        "size_min": 0.10, "size_max": 0.75,
+    },
+    "aggressive": {
+        "name": "🚀 تهاجمی",
+        "target_vol": 0.40,
+        "size_min": 0.10, "size_max": 0.90,
+    },
+}
+
+# ✅ پروفایل فعال (اینجا عوض کن: "conservative" / "balanced" / "aggressive")
+ACTIVE_PROFILE_KEY = "balanced"
+ACTIVE_PROFILE = PROFILES[ACTIVE_PROFILE_KEY]
+
+# Vol targeting safety bounds (global)
+VOL_FLOOR = 0.15
+VOL_CEIL = 0.80
+
 API_KEY = os.environ.get("MARGINPAD_API_KEY", "mpb_d04c938486b9f5e711f9a736084fa9b5").strip()
 TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo").strip()
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
@@ -46,20 +73,20 @@ PIVOT_QQE_PARAMS = {
     "sl_atr_mult": 2.0,
     "tp_rr": 2.0,
     "min_bars": 60,
+    "vol_period": 30,
 }
 
 PIVOT_QQE_TIMEFRAMES = [
-    ("5m",  ["5", "5m", "M5"],                   1),
-    ("15m", ["15", "15m", "M15"],                2),
-    ("30m", ["30", "30m", "M30"],                3),
-    ("1h",  ["60", "60m", "H1"],                 4),
-    ("4h",  ["240", "4h", "H4"],                 5),
+    ("5m",  ["5", "5m", "M5"],                   1, 365 * 24 * 12),
+    ("15m", ["15", "15m", "M15"],                2, 365 * 24 * 4),
+    ("30m", ["30", "30m", "M30"],                3, 365 * 24 * 2),
+    ("1h",  ["60", "60m", "H1"],                 4, 365 * 24),
+    ("4h",  ["240", "4h", "H4"],                 5, 365 * 6),
 ]
 
-RISK_PCT_PER_TRADE = 0.00125
 LEVERAGE = 10
-MAX_NOTIONAL_PCT = 0.15
 MAX_TOTAL_POSITIONS = 8
+MAX_NOTIONAL_PCT = 0.75   # سقف notional = ۷۵٪ موجودی (safety cap)
 LOG_FILE = Path("marginpad_trades_log.json")
 
 MIN_SL_PCT = 0.5
@@ -95,6 +122,15 @@ def is_signal_ok(sig) -> tuple:
     return True, ""
 
 
+def compute_dynamic_size(vol30: float) -> float:
+    """Vol Targeting: size = target_vol / vol30، محدود به [size_min, size_max]."""
+    if np.isnan(vol30) or vol30 <= 0:
+        return ACTIVE_PROFILE["target_vol"]
+    clamped = max(VOL_FLOOR, min(VOL_CEIL, vol30))
+    dyn = ACTIVE_PROFILE["target_vol"] / clamped
+    return max(ACTIVE_PROFILE["size_min"], min(ACTIVE_PROFILE["size_max"], dyn))
+
+
 # ============================================================
 # TELEGRAM
 # ============================================================
@@ -114,20 +150,25 @@ def send_telegram(text: str) -> bool:
         return False
 
 
-def format_new_trade(sym, sig, margin, balance):
+def format_new_trade(sym, sig, notional, margin, balance):
     side = sig["side"]
     emoji = "🟢" if side == "LONG" else "🔴"
     rr = sig["tp_pct"] / sig["sl_pct"] if sig["sl_pct"] > 0 else 0
     tf = sig.get("_tf_label", "1h")
+    vol30 = sig.get("_vol30", 0) * 100
+    dyn = sig.get("_dyn_size", 0) * 100
+    profile = ACTIVE_PROFILE["name"]
     return (
         f"{emoji} <b>معامله جدید: {sym} {side}</b>\n"
-        f"🧠 استراتژی: <b>PivotQQE (MACD 6,19,2)</b>\n"
-        f"📊 تایم‌فریم: <b>{tf}</b>\n\n"
+        f"🧠 استراتژی: <b>VolTarget (MACD 6,19,2)</b>\n"
+        f"📊 تایم‌فریم: <b>{tf}</b> | پروفایل: <b>{profile}</b>\n\n"
         f"📍 ورود: <code>{fmt_price(sig['entry'])}</code>\n"
-        f"🛑 SL: <code>{fmt_price(sig['sl'])}</code> (ریسک {sig['sl_pct']:.2f}%)\n"
-        f"🎯 TP: <code>{fmt_price(sig['tp'])}</code> (هدف {sig['tp_pct']:.2f}%)\n"
-        f"📊 R/R: <b>{rr:.2f}</b>\n"
-        f"💰 مارجین: <b>${margin:.2f}</b> ({LEVERAGE}×)\n"
+        f"🛑 SL: <code>{fmt_price(sig['sl'])}</code> ({sig['sl_pct']:.2f}%)\n"
+        f"🎯 TP: <code>{fmt_price(sig['tp'])}</code> ({sig['tp_pct']:.2f}%)\n"
+        f"📊 R/R: <b>{rr:.2f}</b> | Vol30: <b>{vol30:.1f}%</b>\n"
+        f"💰 Size: <b>{dyn:.1f}%</b> از موجودی\n"
+        f"   Notional: ${notional:,.2f}\n"
+        f"   مارجین: ${margin:.2f} ({LEVERAGE}×)\n"
         f"🏦 موجودی: ${balance:,.2f}\n"
     )
 
@@ -138,7 +179,7 @@ def format_closed_trade(trade):
     reason_line = f"\n📋 دلیل: <b>{reason}</b>" if reason else ""
     return (
         f"{emoji} <b>معامله بسته شد: {trade['symbol']} {trade['side']}</b>\n"
-        f"🧠 PivotQQE | 📊 {trade.get('tf', '1h')}{reason_line}\n\n"
+        f"🧠 VolTarget | 📊 {trade.get('tf', '1h')}{reason_line}\n\n"
         f"📍 ورود: <code>{fmt_price(trade['entry'])}</code>\n"
         f"🏁 خروج: <code>{fmt_price(trade['exit'])}</code>\n"
         f"📊 سود/ضرر: <b>{trade['pnl_pct']:+.2f}%</b>\n"
@@ -156,12 +197,11 @@ def format_strategy_summary(log_data):
     wr = (wins / total) * 100
     total_pnl = df["pnl_pct"].sum()
     avg_pnl = total_pnl / total
-
     long_df = df[df["side"] == "LONG"]
     short_df = df[df["side"] == "SHORT"]
 
     report = (
-        "📈 <b>گزارش PivotQQE (MACD 6,19,2):</b>\n\n"
+        f"📈 <b>گزارش VolTarget ({ACTIVE_PROFILE['name']}):</b>\n\n"
         f"• کل: {total} (✅{wins} / ❌{losses})\n"
         f"• وین‌ریت: {wr:.1f}%\n"
         f"• سود/زیان کل: <b>{total_pnl:+.2f}%</b>\n"
@@ -276,15 +316,20 @@ def klines_to_df(klines):
     return df.set_index("time").sort_index()
 
 
+def compute_vol30(df, bars_per_year):
+    """Vol Targeting: annualized 30-bar rolling std of returns."""
+    ret = df["close"].pct_change()
+    vol = ret.rolling(PIVOT_QQE_PARAMS["vol_period"]).std() * np.sqrt(bars_per_year)
+    return vol
+
+
 # ============================================================
-# STRATEGY: Pivot(8) + QQE(10,5) + MACD(6,19,2) — LONG + SHORT
+# STRATEGY: MACD(6,19,2) + Pivot(8) + QQE(10,5) — LONG + SHORT
 # ============================================================
-def detect_pivot_qqe_signals(df, tf_label):
+def detect_pivot_qqe_signals(df, tf_label, bars_per_year):
     """
     Returns list of signals from the LATEST cross on last 2-3 closed bars.
-    Possible signals:
-      - EXIT_LONG / ENTRY_LONG  (when MACD crosses UP)
-      - EXIT_SHORT / ENTRY_SHORT (when MACD crosses DOWN)
+    Includes vol30 and dynamic_size for Vol Targeting.
     """
     P = PIVOT_QQE_PARAMS
     n = len(df)
@@ -314,8 +359,8 @@ def detect_pivot_qqe_signals(df, tf_label):
     rsi = _rsi(close, P["qqe_rsi"])
     rsi_ma = _ema(rsi, P["qqe_sf"])
     atr = compute_atr(df)
+    vol30 = compute_vol30(df, bars_per_year)
 
-    # پیدا کردن جدیدترین کراس در ۲-۳ کندل آخر
     crosses = []
     for offset in (2, 3):
         i = n - offset
@@ -335,7 +380,6 @@ def detect_pivot_qqe_signals(df, tf_label):
     if not crosses:
         return []
 
-    # جدیدترین کراس مهم است
     crosses.sort(key=lambda x: x[1], reverse=True)
     direction, i, bar_ts = crosses[0]
 
@@ -343,14 +387,15 @@ def detect_pivot_qqe_signals(df, tf_label):
     if atr_val <= 0:
         return []
 
+    vol_val = float(vol30.iloc[i]) if not pd.isna(vol30.iloc[i]) else 0.30
+    dyn = compute_dynamic_size(vol_val)
+
     entry = float(close.iloc[i])
     signals = []
 
     if direction == "UP":
-        # خروج SHORT (همیشه)
         signals.append({"action": "EXIT_SHORT", "side": "SHORT",
                         "entry": entry, "_tf_label": tf_label, "_bar_ts": bar_ts})
-        # ورود LONG (اگر فیلترها پاس شوند)
         pivot_ok = close.iloc[i] > pivot_mid.iloc[i]
         qqe_ok = rsi_ma.iloc[i] > 50
         if pivot_ok and qqe_ok:
@@ -366,12 +411,11 @@ def detect_pivot_qqe_signals(df, tf_label):
                         "entry": entry, "sl": sl_price, "tp": tp_price,
                         "sl_pct": sl_pct, "tp_pct": tp_pct,
                         "_tf_label": tf_label, "_bar_ts": bar_ts,
+                        "_vol30": vol_val, "_dyn_size": dyn,
                     })
     else:  # DOWN
-        # خروج LONG (همیشه)
         signals.append({"action": "EXIT_LONG", "side": "LONG",
                         "entry": entry, "_tf_label": tf_label, "_bar_ts": bar_ts})
-        # ورود SHORT (اگر فیلترها پاس شوند)
         pivot_ok = close.iloc[i] < pivot_mid.iloc[i]
         qqe_ok = rsi_ma.iloc[i] < 50
         if pivot_ok and qqe_ok:
@@ -387,6 +431,7 @@ def detect_pivot_qqe_signals(df, tf_label):
                         "entry": entry, "sl": sl_price, "tp": tp_price,
                         "sl_pct": sl_pct, "tp_pct": tp_pct,
                         "_tf_label": tf_label, "_bar_ts": bar_ts,
+                        "_vol30": vol_val, "_dyn_size": dyn,
                     })
 
     return signals
@@ -398,7 +443,7 @@ def detect_pivot_qqe_signals(df, tf_label):
 def fetch_timeframes(sym):
     needed = PIVOT_QQE_PARAMS["min_bars"] + 50
     data = {}
-    for tf_label, intervals, _ in PIVOT_QQE_TIMEFRAMES:
+    for tf_label, intervals, _, _bpy in PIVOT_QQE_TIMEFRAMES:
         try:
             k_raw = get_klines_fallback(sym, intervals)
             if k_raw and len(k_raw) >= needed:
@@ -416,7 +461,8 @@ def fetch_timeframes(sym):
 def run_scan() -> int:
     now = datetime.now(timezone.utc)
     print("=" * 70)
-    print(f"Pivot+QQE Scan (LONG+SHORT, MACD 6,19,2) — {now.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"VolTarget Scan (LONG+SHORT) — {now.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"Profile: {ACTIVE_PROFILE['name']} | target_vol={ACTIVE_PROFILE['target_vol']*100:.0f}%")
     print("=" * 70)
 
     log = load_log()
@@ -435,12 +481,12 @@ def run_scan() -> int:
         print(f"FATAL positions: {e}"); return 1
 
     # ==========================================================
-    # PHASE 1: EXIT check for open PivotQQE positions
+    # PHASE 1: EXIT check for open VolTarget positions
     # ==========================================================
     newly_closed = []
     for sym in list(log["open_entries"].keys()):
         entry_info = log["open_entries"].get(sym)
-        if not entry_info or entry_info.get("strategy") != "PivotQQE":
+        if not entry_info or entry_info.get("strategy") != "VolTarget":
             continue
         if sym not in open_positions:
             continue
@@ -449,19 +495,19 @@ def run_scan() -> int:
         entry_tf = entry_info.get("tf", "1h")
 
         try:
-            tf_intervals = None
-            for tf_label, intervals, _ in PIVOT_QQE_TIMEFRAMES:
+            tf_intervals, tf_bpy = None, 365
+            for tf_label, intervals, _, bpy in PIVOT_QQE_TIMEFRAMES:
                 if tf_label == entry_tf:
-                    tf_intervals = intervals
+                    tf_intervals, tf_bpy = intervals, bpy
                     break
             if not tf_intervals:
-                tf_intervals = ["60", "60m", "H1"]
+                tf_intervals, tf_bpy = ["60", "60m", "H1"], 365 * 24
 
             k_raw = get_klines_fallback(sym, tf_intervals)
             if not k_raw or len(k_raw) < 60:
                 continue
             df_tf = klines_to_df(k_raw[-300:])
-            signals = detect_pivot_qqe_signals(df_tf, entry_tf)
+            signals = detect_pivot_qqe_signals(df_tf, entry_tf, tf_bpy)
 
             exit_action = f"EXIT_{pos_side}"
             exit_sig = next((s for s in signals if s["action"] == exit_action), None)
@@ -484,7 +530,7 @@ def run_scan() -> int:
 
                 log["open_entries"].pop(sym)
                 closed_record = {
-                    "symbol": sym, "strategy": "PivotQQE", "side": pos_side,
+                    "symbol": sym, "strategy": "VolTarget", "side": pos_side,
                     "entry": entry_price, "exit": current_price,
                     "pnl_pct": round(pnl, 2),
                     "tf": entry_tf,
@@ -493,7 +539,7 @@ def run_scan() -> int:
                 log["closed_trades"].append(closed_record)
                 newly_closed.append(closed_record)
                 open_positions.pop(sym, None)
-                print(f"  [CLOSED-MANUAL] {sym} {pos_side} (PivotQQE {entry_tf}) → PnL: {pnl:+.2f}%")
+                print(f"  [CLOSED-MANUAL] {sym} {pos_side} (VolTarget {entry_tf}) → PnL: {pnl:+.2f}%")
             except Exception as e:
                 print(f"  [{sym}] close pnl error: {e}")
         except Exception as e:
@@ -515,7 +561,7 @@ def run_scan() -> int:
                 else:
                     pnl = (entry_price - current_price) / entry_price * 100
                 closed_record = {
-                    "symbol": sym, "strategy": "PivotQQE", "side": pos_side,
+                    "symbol": sym, "strategy": "VolTarget", "side": pos_side,
                     "entry": entry_price, "exit": current_price,
                     "pnl_pct": round(pnl, 2),
                     "tf": entry_info.get("tf", "1h"),
@@ -523,15 +569,14 @@ def run_scan() -> int:
                 }
                 log["closed_trades"].append(closed_record)
                 newly_closed.append(closed_record)
-                print(f"  [CLOSED-AUTO] {sym} {pos_side} (PivotQQE) → PnL: {pnl:+.2f}%")
+                print(f"  [CLOSED-AUTO] {sym} {pos_side} (VolTarget) → PnL: {pnl:+.2f}%")
             except Exception as e:
                 print(f"  [{sym}] close calc error: {e}")
 
     # ==========================================================
-    # PHASE 3: New entry signals across all 5 TFs
+    # PHASE 3: New entry signals with Vol Targeting sizing
     # ==========================================================
     new_trades = []
-    max_notional = balance_usd * MAX_NOTIONAL_PCT
 
     for sym in SYMBOLS:
         if sym in open_positions:
@@ -551,12 +596,12 @@ def run_scan() -> int:
         tf_data = fetch_timeframes(sym)
         all_entries = []
 
-        for tf_label, _, tf_prio in PIVOT_QQE_TIMEFRAMES:
+        for tf_label, _, tf_prio, bpy in PIVOT_QQE_TIMEFRAMES:
             df_tf = tf_data.get(tf_label)
             if df_tf is None:
                 continue
             try:
-                signals = detect_pivot_qqe_signals(df_tf, tf_label)
+                signals = detect_pivot_qqe_signals(df_tf, tf_label, bpy)
                 for s in signals:
                     if s["action"].startswith("ENTRY_"):
                         s["_tf_prio"] = tf_prio
@@ -567,13 +612,11 @@ def run_scan() -> int:
         if not all_entries:
             continue
 
-        # تضاد جهت → رد
         sides = set(s["side"] for s in all_entries)
         if len(sides) > 1:
             print(f"  [{sym}] SKIP: conflicting directions {list(sides)}")
             continue
 
-        # بالاترین TF برنده
         all_entries.sort(key=lambda x: x["_tf_prio"], reverse=True)
         sig = all_entries[0]
 
@@ -582,7 +625,6 @@ def run_scan() -> int:
             print(f"  [{sym}] SKIP ({sig['side']} {sig['_tf_label']}): {reason}")
             continue
 
-        # اعتبار قیمت لحظه‌ای
         if sig["side"] == "LONG":
             if not (sig["sl"] < current_price < sig["tp"]):
                 print(f"  [{sym}] SKIP: price out of SL/TP range (LONG)")
@@ -597,14 +639,17 @@ def run_scan() -> int:
             print(f"  [{sym}] SKIP: SL/TP too close")
             continue
 
-        risk_amount = balance_usd * RISK_PCT_PER_TRADE
-        sl_frac = sig["sl_pct"] / 100.0
-        if sl_frac <= 0:
-            continue
-        notional = min(risk_amount / sl_frac, max_notional)
+        # ✅ Vol Targeting sizing
+        dyn_size = sig.get("_dyn_size", ACTIVE_PROFILE["target_vol"])
+        notional = balance_usd * dyn_size
+        notional = min(notional, balance_usd * MAX_NOTIONAL_PCT)   # safety cap
         margin = max(notional / LEVERAGE, 1.0)
-        coid = f"PivotQQE-{sig['side']}-{sym}-{int(now.timestamp())}"
 
+        if margin < 1.0:
+            print(f"  [{sym}] SKIP: margin ${margin:.2f} too small")
+            continue
+
+        coid = f"VolTarget-{sig['side']}-{sym}-{int(now.timestamp())}"
         sl_r = round_price(sig["sl"], sig["entry"])
         tp_r = round_price(sig["tp"], sig["entry"])
         side_lc = "long" if sig["side"] == "LONG" else "short"
@@ -620,16 +665,17 @@ def run_scan() -> int:
 
         tf_saved = sig["_tf_label"]
         log["open_entries"][sym] = {
-            "strategy": "PivotQQE", "side": sig["side"], "entry": sig["entry"],
+            "strategy": "VolTarget", "side": sig["side"], "entry": sig["entry"],
             "sl": sig["sl"], "tp": sig["tp"], "margin": margin, "tf": tf_saved,
             "_bar_ts": sig.get("_bar_ts"),
         }
-        new_trades.append((sym, sig, margin))
+        new_trades.append((sym, sig, notional, margin))
 
         emoji = "🟢" if sig["side"] == "LONG" else "🔴"
         rr = sig["tp_pct"] / sig["sl_pct"] if sig["sl_pct"] > 0 else 0
-        print(f"  {emoji} [PivotQQE {tf_saved}] {sig['side']} {sym} @ {fmt_price(sig['entry'])} "
-              f"| R/R {rr:.2f} | Margin: ${margin:.2f}")
+        print(f"  {emoji} [VolTarget {tf_saved}] {sig['side']} {sym} "
+              f"@ {fmt_price(sig['entry'])} | R/R {rr:.2f} | "
+              f"Size {dyn_size*100:.1f}% | Margin ${margin:.2f}")
 
     save_log(log)
 
@@ -639,8 +685,8 @@ def run_scan() -> int:
     msg_blocks = []
     if new_trades:
         msg_blocks.append(f"<b>🔔 معاملات جدید — {now.strftime('%H:%M')} UTC</b>")
-        for sym, sig, margin in new_trades:
-            msg_blocks.append(format_new_trade(sym, sig, margin, balance_usd))
+        for sym, sig, notional, margin in new_trades:
+            msg_blocks.append(format_new_trade(sym, sig, notional, margin, balance_usd))
     if newly_closed:
         msg_blocks.append(f"<b>🔒 معاملات بسته‌شده — {now.strftime('%H:%M')} UTC</b>")
         for t in newly_closed:
