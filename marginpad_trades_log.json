@@ -1,42 +1,91 @@
-name: MarginPad Multi-Strategy Scanner
-
-on:
-  schedule:
-    - cron: '*/15 * * * *'
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  scan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install deps
-        run: pip install requests pandas numpy
-
-      - name: Run scanner
-        env:
-          MARGINPAD_API_KEY: ${{ secrets.MARGINPAD_API_KEY }}
-          TELEGRAM_TOKEN: ${{ secrets.TG_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT }}
-        run: python acmts_scanner.py
-
-      # 🟢 کامیت کردن تاریخچه برای حفظ گزارش بازدهی
-      - name: Save trade log
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add marginpad_trades_log.json || true
-          git diff --cached --quiet || git commit -m "update trade log [skip ci]"
-          git push || true
+{
+  "open_entries": {
+    "ADA:SHORT": {
+      "symbol": "ADA",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.20518,
+      "sl": 0.21069451795678537,
+      "tp": 0.19415096408642926,
+      "margin": 43.9178927737466,
+      "tf": "1h",
+      "paper": false
+    },
+    "LINK:SHORT": {
+      "symbol": "LINK",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 11.366,
+      "sl": 11.653501255287162,
+      "tp": 10.790997489425674,
+      "margin": 46.66399643751064,
+      "tf": "1h",
+      "paper": false
+    },
+    "LTC:SHORT": {
+      "symbol": "LTC",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 56.31,
+      "sl": 57.57872186945995,
+      "tp": 53.77255626108011,
+      "margin": 52.38815757214975,
+      "tf": "1h",
+      "paper": false
+    },
+    "ENA:SHORT": {
+      "symbol": "ENA",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.20838,
+      "sl": 0.21130311604155633,
+      "tp": 0.20253376791688738,
+      "margin": 84.14416425084686,
+      "tf": "5m",
+      "paper": false
+    },
+    "OP:SHORT": {
+      "symbol": "OP",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.1097,
+      "sl": 0.11320580404699199,
+      "tp": 0.10268839190601604,
+      "margin": 36.934567117663036,
+      "tf": "1h",
+      "paper": false
+    },
+    "SUI:SHORT": {
+      "symbol": "SUI",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.9091,
+      "sl": 0.9362613214836034,
+      "tp": 0.8547773570327932,
+      "margin": 39.50706670412858,
+      "tf": "1h",
+      "paper": false
+    },
+    "APT:SHORT": {
+      "symbol": "APT",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.693,
+      "sl": 0.715990181542486,
+      "tp": 0.647019636915028,
+      "margin": 35.579911025859104,
+      "tf": "1h",
+      "paper": false
+    }
+  },
+  "closed_trades": [],
+  "last_entry_bar": {
+    "DailyMACD:ADA:SHORT": 1793041200,
+    "DailyMACD:LINK:SHORT": 1793037600,
+    "DailyMACD:LTC:SHORT": 1793037600,
+    "DailyMACD:ENA:SHORT": 1793046300,
+    "DailyMACD:OP:SHORT": 1793037600,
+    "DailyMACD:SUI:SHORT": 1793037600,
+    "DailyMACD:APT:SHORT": 1793037600
+  }
+}
