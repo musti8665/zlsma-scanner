@@ -1041,7 +1041,7 @@ def detect_donchian_signals(df, tf_label):
                 sl_pct = sl_dist / close_v * 100
                 tp_pct = (tp_price - close_v) / close_v * 100
                 if 0 < sl_pct < 25:
-                    sigs.append({"action": "ENTRY_LONG", "side": "LONG",
+                    sigs.append({"action": "ENTRY_LONG", "side": "LONG", "strategy": "Donchian",
                                  "entry": close_v, "sl": sl_price, "tp": tp_price,
                                  "sl_pct": sl_pct, "tp_pct": tp_pct,
                                  "_tf_label": tf_label, "_bar_ts": bar_ts,
@@ -1055,7 +1055,7 @@ def detect_donchian_signals(df, tf_label):
                 sl_pct = sl_dist / close_v * 100
                 tp_pct = (close_v - tp_price) / close_v * 100
                 if 0 < sl_pct < 25:
-                    sigs.append({"action": "ENTRY_SHORT", "side": "SHORT",
+                    sigs.append({"action": "ENTRY_SHORT", "side": "SHORT", "strategy": "Donchian",
                                  "entry": close_v, "sl": sl_price, "tp": tp_price,
                                  "sl_pct": sl_pct, "tp_pct": tp_pct,
                                  "_tf_label": tf_label, "_bar_ts": bar_ts,
@@ -1136,7 +1136,7 @@ def detect_daily_macd_signals(df, tf_label, bars_per_year):
                 slp = (entry - sl) / entry * 100
                 tpp = (tp - entry) / entry * 100
                 if 0 < slp < 20:
-                    out.append({"action": "ENTRY_LONG", "side": "LONG",
+                    out.append({"action": "ENTRY_LONG", "side": "LONG", "strategy": "DailyMACD",
                                 "entry": entry, "sl": sl, "tp": tp,
                                 "sl_pct": slp, "tp_pct": tpp,
                                 "_tf_label": tf_label, "_bar_ts": bar_ts,
@@ -1151,7 +1151,7 @@ def detect_daily_macd_signals(df, tf_label, bars_per_year):
                 slp = (sl - entry) / entry * 100
                 tpp = (entry - tp) / entry * 100
                 if 0 < slp < 20:
-                    out.append({"action": "ENTRY_SHORT", "side": "SHORT",
+                    out.append({"action": "ENTRY_SHORT", "side": "SHORT", "strategy": "DailyMACD",
                                 "entry": entry, "sl": sl, "tp": tp,
                                 "sl_pct": slp, "tp_pct": tpp,
                                 "_tf_label": tf_label, "_bar_ts": bar_ts,
