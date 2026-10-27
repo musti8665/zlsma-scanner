@@ -1,38 +1,5 @@
 {
   "open_entries": {
-    "ADA:SHORT": {
-      "symbol": "ADA",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 0.20518,
-      "sl": 0.21069451795678537,
-      "tp": 0.19415096408642926,
-      "margin": 43.9178927737466,
-      "tf": "1h",
-      "paper": false
-    },
-    "LTC:SHORT": {
-      "symbol": "LTC",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 56.31,
-      "sl": 57.57872186945995,
-      "tp": 53.77255626108011,
-      "margin": 52.38815757214975,
-      "tf": "1h",
-      "paper": false
-    },
-    "OP:SHORT": {
-      "symbol": "OP",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 0.1097,
-      "sl": 0.11320580404699199,
-      "tp": 0.10268839190601604,
-      "margin": 36.934567117663036,
-      "tf": "1h",
-      "paper": false
-    },
     "SUI:SHORT": {
       "symbol": "SUI",
       "strategy": "DailyMACD",
@@ -55,37 +22,70 @@
       "tf": "1h",
       "paper": false
     },
-    "NEAR:SHORT": {
-      "symbol": "NEAR",
+    "AVAX:SHORT": {
+      "symbol": "AVAX",
       "strategy": "DailyMACD",
       "side": "SHORT",
-      "entry": 4.425,
-      "sl": 4.468763260243335,
-      "tp": 4.337473479513329,
-      "margin": 119.0392795185622,
-      "tf": "5m",
+      "entry": 8.792,
+      "sl": 9.222222364009365,
+      "tp": 7.931555271981269,
+      "margin": 23.99782648159883,
+      "tf": "4h",
       "paper": false
     },
-    "PEPE:SHORT": {
-      "symbol": "PEPE",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 4.3011e-06,
-      "sl": 4.38802923947668e-06,
-      "tp": 4.127241521046641e-06,
-      "margin": 58.25782809084167,
-      "tf": "30m",
-      "paper": false
-    },
-    "APT:LONG": {
-      "symbol": "APT",
+    "INJ:LONG": {
+      "symbol": "INJ",
       "strategy": "DailyMACD",
       "side": "LONG",
-      "entry": 0.6839,
-      "sl": 0.6799212815143237,
-      "tp": 0.6918574369713524,
-      "margin": 141.2934,
-      "tf": "5m",
+      "entry": 8.033,
+      "sl": 7.694690056176419,
+      "tp": 8.709619887647161,
+      "margin": 27.883046026927026,
+      "tf": "1h",
+      "paper": false
+    },
+    "TIA:SHORT": {
+      "symbol": "TIA",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.5246,
+      "sl": 0.5683188541153726,
+      "tp": 0.4371622917692546,
+      "margin": 14.090834937583281,
+      "tf": "4h",
+      "paper": false
+    },
+    "UNI:LONG": {
+      "symbol": "UNI",
+      "strategy": "DailyMACD",
+      "side": "LONG",
+      "entry": 7.099,
+      "sl": 6.869121450846483,
+      "tp": 7.558757098307035,
+      "margin": 36.264019569015275,
+      "tf": "1h",
+      "paper": false
+    },
+    "AAVE:SHORT": {
+      "symbol": "AAVE",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 131.68,
+      "sl": 139.25409341595062,
+      "tp": 116.53181316809878,
+      "margin": 20.415798579187772,
+      "tf": "4h",
+      "paper": false
+    },
+    "FIL:SHORT": {
+      "symbol": "FIL",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.89,
+      "sl": 0.9491309858448334,
+      "tp": 0.7717380283103333,
+      "margin": 17.674701936181556,
+      "tf": "4h",
       "paper": false
     }
   },
@@ -122,6 +122,72 @@
       "tf": "1h",
       "paper": false,
       "close_reason": "MACD-EXIT (1h)"
+    },
+    {
+      "symbol": "ADA",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.20518,
+      "exit": 0.20436,
+      "pnl_pct": 0.4,
+      "tf": "1h",
+      "paper": false,
+      "close_reason": "MACD-EXIT (1h)"
+    },
+    {
+      "symbol": "LTC",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 56.31,
+      "exit": 56.39,
+      "pnl_pct": -0.14,
+      "tf": "1h",
+      "paper": false,
+      "close_reason": "MACD-EXIT (1h)"
+    },
+    {
+      "symbol": "OP",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.1097,
+      "exit": 0.11065,
+      "pnl_pct": -0.87,
+      "tf": "1h",
+      "paper": false,
+      "close_reason": "MACD-EXIT (1h)"
+    },
+    {
+      "symbol": "PEPE",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 4.3011e-06,
+      "exit": 4.3345e-06,
+      "pnl_pct": -0.78,
+      "tf": "30m",
+      "paper": false,
+      "close_reason": "MACD-EXIT (30m)"
+    },
+    {
+      "symbol": "NEAR",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 4.425,
+      "exit": 4.547,
+      "pnl_pct": -2.76,
+      "tf": "5m",
+      "paper": false,
+      "close_reason": "SL/TP"
+    },
+    {
+      "symbol": "APT",
+      "strategy": "DailyMACD",
+      "side": "LONG",
+      "entry": 0.6839,
+      "exit": 0.6829,
+      "pnl_pct": -0.15,
+      "tf": "5m",
+      "paper": false,
+      "close_reason": "SL/TP"
     }
   ],
   "last_entry_bar": {
@@ -135,6 +201,12 @@
     "DailyMACD:ENA:LONG": 1793077200,
     "DailyMACD:NEAR:SHORT": 1793081400,
     "DailyMACD:PEPE:SHORT": 1793082600,
-    "DailyMACD:APT:LONG": 1793084100
+    "DailyMACD:APT:LONG": 1793084100,
+    "DailyMACD:AVAX:SHORT": 1793073600,
+    "DailyMACD:INJ:LONG": 1793102400,
+    "DailyMACD:TIA:SHORT": 1793088000,
+    "DailyMACD:UNI:LONG": 1793102400,
+    "DailyMACD:AAVE:SHORT": 1793073600,
+    "DailyMACD:FIL:SHORT": 1793088000
   }
 }
