@@ -11,17 +11,6 @@
       "tf": "1h",
       "paper": false
     },
-    "LINK:SHORT": {
-      "symbol": "LINK",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 11.366,
-      "sl": 11.653501255287162,
-      "tp": 10.790997489425674,
-      "margin": 46.66399643751064,
-      "tf": "1h",
-      "paper": false
-    },
     "LTC:SHORT": {
       "symbol": "LTC",
       "strategy": "DailyMACD",
@@ -31,17 +20,6 @@
       "tp": 53.77255626108011,
       "margin": 52.38815757214975,
       "tf": "1h",
-      "paper": false
-    },
-    "ENA:SHORT": {
-      "symbol": "ENA",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 0.20838,
-      "sl": 0.21130311604155633,
-      "tp": 0.20253376791688738,
-      "margin": 84.14416425084686,
-      "tf": "5m",
       "paper": false
     },
     "OP:SHORT": {
@@ -76,9 +54,54 @@
       "margin": 35.579911025859104,
       "tf": "1h",
       "paper": false
+    },
+    "ENA:LONG": {
+      "symbol": "ENA",
+      "strategy": "DailyMACD",
+      "side": "LONG",
+      "entry": 0.20908,
+      "sl": 0.19848843892193133,
+      "tp": 0.2302631221561373,
+      "margin": 23.240164583451996,
+      "tf": "1h",
+      "paper": false
+    },
+    "NEAR:SHORT": {
+      "symbol": "NEAR",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 4.425,
+      "sl": 4.468763260243335,
+      "tp": 4.337473479513329,
+      "margin": 119.0392795185622,
+      "tf": "5m",
+      "paper": false
     }
   },
-  "closed_trades": [],
+  "closed_trades": [
+    {
+      "symbol": "LINK",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 11.366,
+      "exit": 11.347,
+      "pnl_pct": 0.17,
+      "tf": "1h",
+      "paper": false,
+      "close_reason": "MACD-EXIT (1h)"
+    },
+    {
+      "symbol": "ENA",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.20838,
+      "exit": 0.2074,
+      "pnl_pct": 0.47,
+      "tf": "5m",
+      "paper": false,
+      "close_reason": "SL/TP"
+    }
+  ],
   "last_entry_bar": {
     "DailyMACD:ADA:SHORT": 1793041200,
     "DailyMACD:LINK:SHORT": 1793037600,
@@ -86,6 +109,8 @@
     "DailyMACD:ENA:SHORT": 1793046300,
     "DailyMACD:OP:SHORT": 1793037600,
     "DailyMACD:SUI:SHORT": 1793037600,
-    "DailyMACD:APT:SHORT": 1793037600
+    "DailyMACD:APT:SHORT": 1793037600,
+    "DailyMACD:ENA:LONG": 1793077200,
+    "DailyMACD:NEAR:SHORT": 1793081400
   }
 }
