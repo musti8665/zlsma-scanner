@@ -44,17 +44,6 @@
       "tf": "1h",
       "paper": false
     },
-    "TIA:SHORT": {
-      "symbol": "TIA",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 0.5246,
-      "sl": 0.5683188541153726,
-      "tp": 0.4371622917692546,
-      "margin": 14.090834937583281,
-      "tf": "4h",
-      "paper": false
-    },
     "UNI:LONG": {
       "symbol": "UNI",
       "strategy": "DailyMACD",
@@ -66,26 +55,37 @@
       "tf": "1h",
       "paper": false
     },
-    "AAVE:SHORT": {
-      "symbol": "AAVE",
+    "LINK:LONG": {
+      "symbol": "LINK",
       "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 131.68,
-      "sl": 139.25409341595062,
-      "tp": 116.53181316809878,
-      "margin": 20.415798579187772,
-      "tf": "4h",
+      "side": "LONG",
+      "entry": 11.481,
+      "sl": 11.420986541536998,
+      "tp": 11.601026916926005,
+      "margin": 140.8344,
+      "tf": "5m",
       "paper": false
     },
-    "FIL:SHORT": {
-      "symbol": "FIL",
+    "ATOM:SHORT": {
+      "symbol": "ATOM",
       "strategy": "DailyMACD",
       "side": "SHORT",
-      "entry": 0.89,
-      "sl": 0.9491309858448334,
-      "tp": 0.7717380283103333,
-      "margin": 17.674701936181556,
-      "tf": "4h",
+      "entry": 1.606,
+      "sl": 1.6446849521854365,
+      "tp": 1.5286300956291272,
+      "margin": 48.72265864424605,
+      "tf": "1h",
+      "paper": false
+    },
+    "RENDER:LONG": {
+      "symbol": "RENDER",
+      "strategy": "DailyMACD",
+      "side": "LONG",
+      "entry": 1.694,
+      "sl": 1.6691594937924947,
+      "tp": 1.7436810124150104,
+      "margin": 80.03509523486758,
+      "tf": "15m",
       "paper": false
     }
   },
@@ -188,6 +188,39 @@
       "tf": "5m",
       "paper": false,
       "close_reason": "SL/TP"
+    },
+    {
+      "symbol": "TIA",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.5246,
+      "exit": 0.54,
+      "pnl_pct": -2.94,
+      "tf": "4h",
+      "paper": false,
+      "close_reason": "MACD-EXIT (4h)"
+    },
+    {
+      "symbol": "AAVE",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 131.68,
+      "exit": 132.44,
+      "pnl_pct": -0.58,
+      "tf": "4h",
+      "paper": false,
+      "close_reason": "MACD-EXIT (4h)"
+    },
+    {
+      "symbol": "FIL",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.89,
+      "exit": 0.9052,
+      "pnl_pct": -1.71,
+      "tf": "4h",
+      "paper": false,
+      "close_reason": "MACD-EXIT (4h)"
     }
   ],
   "last_entry_bar": {
@@ -207,6 +240,9 @@
     "DailyMACD:TIA:SHORT": 1793088000,
     "DailyMACD:UNI:LONG": 1793102400,
     "DailyMACD:AAVE:SHORT": 1793073600,
-    "DailyMACD:FIL:SHORT": 1793088000
+    "DailyMACD:FIL:SHORT": 1793088000,
+    "DailyMACD:LINK:LONG": 1793126100,
+    "DailyMACD:ATOM:SHORT": 1793120400,
+    "DailyMACD:RENDER:LONG": 1793124000
   }
 }
