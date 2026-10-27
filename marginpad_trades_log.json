@@ -1,94 +1,5 @@
 {
-  "open_entries": {
-    "SUI:SHORT": {
-      "symbol": "SUI",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 0.9091,
-      "sl": 0.9362613214836034,
-      "tp": 0.8547773570327932,
-      "margin": 39.50706670412858,
-      "tf": "1h",
-      "paper": false
-    },
-    "APT:SHORT": {
-      "symbol": "APT",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 0.693,
-      "sl": 0.715990181542486,
-      "tp": 0.647019636915028,
-      "margin": 35.579911025859104,
-      "tf": "1h",
-      "paper": false
-    },
-    "AVAX:SHORT": {
-      "symbol": "AVAX",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 8.792,
-      "sl": 9.222222364009365,
-      "tp": 7.931555271981269,
-      "margin": 23.99782648159883,
-      "tf": "4h",
-      "paper": false
-    },
-    "INJ:LONG": {
-      "symbol": "INJ",
-      "strategy": "DailyMACD",
-      "side": "LONG",
-      "entry": 8.033,
-      "sl": 7.694690056176419,
-      "tp": 8.709619887647161,
-      "margin": 27.883046026927026,
-      "tf": "1h",
-      "paper": false
-    },
-    "UNI:LONG": {
-      "symbol": "UNI",
-      "strategy": "DailyMACD",
-      "side": "LONG",
-      "entry": 7.099,
-      "sl": 6.869121450846483,
-      "tp": 7.558757098307035,
-      "margin": 36.264019569015275,
-      "tf": "1h",
-      "paper": false
-    },
-    "LINK:LONG": {
-      "symbol": "LINK",
-      "strategy": "DailyMACD",
-      "side": "LONG",
-      "entry": 11.481,
-      "sl": 11.420986541536998,
-      "tp": 11.601026916926005,
-      "margin": 140.8344,
-      "tf": "5m",
-      "paper": false
-    },
-    "ATOM:SHORT": {
-      "symbol": "ATOM",
-      "strategy": "DailyMACD",
-      "side": "SHORT",
-      "entry": 1.606,
-      "sl": 1.6446849521854365,
-      "tp": 1.5286300956291272,
-      "margin": 48.72265864424605,
-      "tf": "1h",
-      "paper": false
-    },
-    "RENDER:LONG": {
-      "symbol": "RENDER",
-      "strategy": "DailyMACD",
-      "side": "LONG",
-      "entry": 1.694,
-      "sl": 1.6691594937924947,
-      "tp": 1.7436810124150104,
-      "margin": 80.03509523486758,
-      "tf": "15m",
-      "paper": false
-    }
-  },
+  "open_entries": {},
   "closed_trades": [
     {
       "symbol": "LINK",
@@ -221,6 +132,94 @@
       "tf": "4h",
       "paper": false,
       "close_reason": "MACD-EXIT (4h)"
+    },
+    {
+      "symbol": "SUI",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.9091,
+      "exit": 0.9091,
+      "pnl_pct": 0.0,
+      "tf": "1h",
+      "close_reason": "SL/TP (exchange)",
+      "paper": false
+    },
+    {
+      "symbol": "APT",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 0.693,
+      "exit": 0.693,
+      "pnl_pct": 0.0,
+      "tf": "1h",
+      "close_reason": "SL/TP (exchange)",
+      "paper": false
+    },
+    {
+      "symbol": "AVAX",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 8.792,
+      "exit": 8.934,
+      "pnl_pct": -1.62,
+      "tf": "4h",
+      "close_reason": "SL/TP (exchange)",
+      "paper": false
+    },
+    {
+      "symbol": "INJ",
+      "strategy": "DailyMACD",
+      "side": "LONG",
+      "entry": 8.033,
+      "exit": 7.933,
+      "pnl_pct": -1.24,
+      "tf": "1h",
+      "close_reason": "SL/TP (exchange)",
+      "paper": false
+    },
+    {
+      "symbol": "UNI",
+      "strategy": "DailyMACD",
+      "side": "LONG",
+      "entry": 7.099,
+      "exit": 7.085,
+      "pnl_pct": -0.2,
+      "tf": "1h",
+      "close_reason": "SL/TP (exchange)",
+      "paper": false
+    },
+    {
+      "symbol": "LINK",
+      "strategy": "DailyMACD",
+      "side": "LONG",
+      "entry": 11.481,
+      "exit": 11.532,
+      "pnl_pct": 0.44,
+      "tf": "5m",
+      "close_reason": "SL/TP (exchange)",
+      "paper": false
+    },
+    {
+      "symbol": "ATOM",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 1.606,
+      "exit": 1.615,
+      "pnl_pct": -0.56,
+      "tf": "1h",
+      "close_reason": "SL/TP (exchange)",
+      "paper": false
+    },
+    {
+      "symbol": "RENDER",
+      "strategy": "DailyMACD",
+      "side": "LONG",
+      "entry": 1.694,
+      "exit": 1.698,
+      "pnl_pct": 0.24,
+      "tf": "15m",
+      "close_reason": "SL/TP (exchange)",
+      "paper": false
     }
   ],
   "last_entry_bar": {
