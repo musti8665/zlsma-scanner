@@ -86,17 +86,18 @@ DAILY_MACD_PARAMS = {
     "kijun_p": 20,
 }
 
+# ✅ OPT: کاهش aliasها برای کاهش تعداد درخواست‌های fallback
 SCAN_TIMEFRAMES = [
-    ("5m",  ["5", "5m", "M5"],                   1, 365 * 24 * 12),
-    ("15m", ["15", "15m", "M15"],                2, 365 * 24 * 4),
-    ("30m", ["30", "30m", "M30"],                3, 365 * 24 * 2),
-    ("1h",  ["60", "60m", "H1"],                 4, 365 * 24),
-    ("4h",  ["240", "4h", "H4"],                 5, 365 * 6),
+    ("5m",  ["5", "5m"],          1, 365 * 24 * 12),
+    ("15m", ["15", "15m"],        2, 365 * 24 * 4),
+    ("30m", ["30", "30m"],        3, 365 * 24 * 2),
+    ("1h",  ["60", "1h"],         4, 365 * 24),
+    ("4h",  ["240", "4h"],        5, 365 * 6),
 ]
 
 DAILY_MACD_TIMEFRAMES = [
-    ("4h",  ["240", "4h", "H4"],                  5, 365 * 6),
-    ("1d",  ["1440", "1d", "D", "D1", "day"],     6, 365),
+    ("4h", ["240", "4h"],          5, 365 * 6),
+    ("1d", ["1440", "1d"],         6, 365),
 ]
 
 LEVERAGE = 10
@@ -115,6 +116,26 @@ KILL_SILENCE_DAYS     = 10
 
 FILTERS_DONCHIAN = {"min_sl": 0.5, "min_tp": 0.3, "min_rr": 0.5}
 FILTERS_DAILY    = {"min_sl": 0.5, "min_tp": 1.0, "min_rr": 1.5}
+
+# ============================================================
+# ✅ OPT: کش درون‌حافظه‌ای برای جلوگیری از فراخوانی تکراری API
+# ============================================================
+_KLINES_CACHE = {}
+
+def clear_klines_cache():
+    _KLINES_CACHE.clear()
+
+def get_klines_cached(symbol, interval):
+    key = (symbol, interval)
+    if key in _KLINES_CACHE:
+        return _KLINES_CACHE[key]
+    try:
+        k = get_klines(symbol, interval)
+        _KLINES_CACHE[key] = k
+        return k
+    except Exception:
+        _KLINES_CACHE[key] = None
+        return None
 
 
 def fmt_price(p):
@@ -380,13 +401,11 @@ def get_klines(symbol, interval):
 
 
 def get_klines_fallback(symbol, intervals):
+    """✅ OPT: استفاده از کش"""
     for interval in intervals:
-        try:
-            k = get_klines(symbol, interval)
-            if k and len(k) >= 50:
-                return k
-        except Exception:
-            continue
+        k = get_klines_cached(symbol, interval)
+        if k and len(k) >= 50:
+            return k
     return None
 
 
@@ -671,35 +690,37 @@ def fetch_timeframes(sym, min_bars_needed, bars=500):
 
 
 def fetch_daily_macd_tf(sym, tf_label):
+    """✅ OPT: استفاده از کش"""
     intervals = None; bpy = 365
     for lbl, iv, _, b in DAILY_MACD_TIMEFRAMES:
         if lbl == tf_label: intervals = iv; bpy = b; break
-    if intervals is None: intervals = ["1440", "1d", "D", "D1", "day"]
+    if intervals is None: intervals = ["1440", "1d"]
     for interval in intervals:
-        try:
-            k = get_klines(sym, interval)
-            if k and len(k) >= DAILY_MACD_PARAMS["min_bars"]:
-                return klines_to_df(k[-300:]), bpy
-        except Exception: continue
+        k = get_klines_cached(sym, interval)
+        if k and len(k) >= DAILY_MACD_PARAMS["min_bars"]:
+            return klines_to_df(k[-300:]), bpy
     return None, bpy
 
 
 def _get_price_safe(sym, interval="60", fallback=None):
-    """✅ FIX: قیمت با fallback ایمن"""
-    try:
-        k = get_klines(sym, interval)
-        if k:
-            return float(k[-1]["close"])
-    except Exception:
-        pass
+    """✅ FIX+OPT: قیمت با کش و fallback ایمن"""
+    k = get_klines_cached(sym, interval)
+    if k:
+        return float(k[-1]["close"])
     return fallback
 
 
 def run_scan():
+    clear_klines_cache()   # ✅ OPT: هر اسکن با کش تازه شروع شود
     now = datetime.now(timezone.utc)
     today_str = now.strftime("%Y-%m-%d")
+
+    interval_min = int(os.environ.get("INTERVAL_MIN", "0"))
+    mode_str = f"Loop every {interval_min}min" if interval_min > 0 else "Single run"
+
     print("=" * 70)
     print(f"Dual-Strategy Scan — {now.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"  Mode: {mode_str}")
     print(f"  Donchian: {'ON' if ENABLE_DONCHIAN else 'OFF'} "
           f"(spot_safe, max {MAX_DONCHIAN_POSITIONS})")
     print(f"  DailyMACD: {'ON' if ENABLE_DAILY else 'OFF'} "
@@ -748,7 +769,7 @@ def run_scan():
         return 1
 
     newly_closed = []
-    new_trades = []  # ✅ همه به فرمت ("استراتژی", sym, sig, notional, margin)
+    new_trades = []  # همه به فرمت ("استراتژی", sym, sig, notional, margin)
 
     def count_strategy_total(strategy):
         return sum(1 for v in log["open_entries"].values()
@@ -766,7 +787,7 @@ def run_scan():
             pos_side = info.get("side", "LONG")
             entry_tf = info.get("tf", "1h")
             try:
-                tf_intervals = ["60", "60m", "H1"]
+                tf_intervals = ["60", "1h"]
                 for tf_label, intervals, _, _ in SCAN_TIMEFRAMES:
                     if tf_label == entry_tf:
                         tf_intervals = intervals
@@ -926,7 +947,8 @@ def run_scan():
 
         # -------- 3a. Donchian --------
         if ENABLE_DONCHIAN:
-            for sym in DONCHIAN_SYMBOLS:
+            total_dn = len(DONCHIAN_SYMBOLS)
+            for idx, sym in enumerate(DONCHIAN_SYMBOLS, 1):
                 if sym in open_positions or sym in newly_opened_symbols:
                     continue
                 if (count_strategy_total("Donchian")
@@ -937,6 +959,8 @@ def run_scan():
                 if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
                     print(f"  Max total ({MAX_TOTAL_POSITIONS}) reached")
                     break
+
+                print(f"  [scan DN {idx}/{total_dn}] {sym}...", flush=True)
 
                 current_price = _get_price_safe(sym, "60", fallback=None)
                 if current_price is None:
@@ -995,23 +1019,23 @@ def run_scan():
                     continue
 
                 log["open_entries"][f"Donchian:{sym}"] = {
-                    "symbol": sym,                                  # ✅ FIX: symbol اضافه شد
+                    "symbol": sym,
                     "strategy": "Donchian", "side": sig["side"], "entry": sig["entry"],
                     "sl": sig["sl"], "tp": sig["tp"], "margin": margin,
                     "tf": sig["_tf_label"], "_bar_ts": sig.get("_bar_ts"),
                     "profile": ACTIVE_DONCHIAN_PROFILE_KEY, "paper": False,
                 }
-                new_trades.append(("Donchian", sym, sig, notional, margin))  # ✅ 5-tuple
+                new_trades.append(("Donchian", sym, sig, notional, margin))
                 newly_opened_symbols.add(sym)
                 print(f"  [Donchian {sig['_tf_label']}] {sig['side']} {sym} "
                       f"@ {fmt_price(sig['entry'])} | {sf*100:.0f}% spot")
 
         # -------- 3b. DailyMACD --------
         if ENABLE_DAILY:
-            for sym in DAILY_SYMBOLS:
+            total_dm = len(DAILY_SYMBOLS)
+            for idx, sym in enumerate(DAILY_SYMBOLS, 1):
                 if not DAILY_PAPER_MODE and (sym in open_positions or sym in newly_opened_symbols):
                     continue
-                # ✅ FIX: چک صحیح paper
                 if DAILY_PAPER_MODE and any(k.startswith(f"PAPER:{sym}:") for k in log["open_entries"]):
                     continue
                 if (count_strategy_total("DailyMACD")
@@ -1022,6 +1046,8 @@ def run_scan():
                 if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
                     print(f"  Max total ({MAX_TOTAL_POSITIONS}) reached")
                     break
+
+                print(f"  [scan DM {idx}/{total_dm}] {sym}...", flush=True)
 
                 sigs_by_side = {"LONG": [], "SHORT": []}
                 for tf_label, iv, tf_prio, bpy in DAILY_MACD_TIMEFRAMES:
@@ -1064,7 +1090,6 @@ def run_scan():
                     if not ok:
                         continue
 
-                    # بررسی قیمت فعلی
                     try:
                         df_tf_check, _ = fetch_daily_macd_tf(sym, tf_label)
                         if df_tf_check is None:
@@ -1078,7 +1103,6 @@ def run_scan():
                     if side == "SHORT" and not (sig["tp"] < current_price < sig["sl"]):
                         continue
 
-                    # ✅ FIX: سایز بر اساس پروفایل (نه متغیرهای تعریف‌نشده)
                     vol30 = sig.get("_vol30", 0.30)
                     if pd.isna(vol30):
                         vol30 = 0.30
@@ -1096,7 +1120,7 @@ def run_scan():
                         }
                         if bar_ts:
                             record_entry_bar(log, cooldown_key, bar_ts)
-                        new_trades.append(("DailyMACD", sym, sig, notional, margin))  # ✅ 5-tuple
+                        new_trades.append(("DailyMACD", sym, sig, notional, margin))
                         print(f"  📝 [PAPER {tf_label}] DailyMACD {side} {sym} "
                               f"@ {fmt_price(sig['entry'])} | {size_frac*100:.1f}%")
                     else:
@@ -1121,8 +1145,8 @@ def run_scan():
                         }
                         if bar_ts:
                             record_entry_bar(log, cooldown_key, bar_ts)
-                        new_trades.append(("DailyMACD", sym, sig, notional, margin))  # ✅ 5-tuple
-                        newly_opened_symbols.add(sym)  # ✅ FIX: اضافه شد
+                        new_trades.append(("DailyMACD", sym, sig, notional, margin))
+                        newly_opened_symbols.add(sym)
                         print(f"  🟢 [LIVE {tf_label}] DailyMACD {side} {sym} "
                               f"@ {fmt_price(sig['entry'])} | {size_frac*100:.1f}%")
 
