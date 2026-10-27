@@ -60,7 +60,6 @@ BASE = "https://marginpad.io/api/bot/v1"
 HEADERS = {"X-API-Key": API_KEY}
 H_JSON = {**HEADERS, "Content-Type": "application/json"}
 
-# 👇 ۲۲ ارز مد نظر شما 👇
 SYMBOLS = [
     "ADA", "AVAX", "LINK", "LTC",
     "ENA", "ATOM", "NEAR", "ARB", "OP", "PEPE", "SHIB", "SUI",
@@ -70,7 +69,6 @@ SYMBOLS = [
 DONCHIAN_SYMBOLS = SYMBOLS
 DAILY_SYMBOLS    = SYMBOLS
 
-# 👇 پارامترهای طلایی Donchian (از بک‌تست) 👇
 DONCHIAN_PARAMS = {
     "entry_n": 10, "exit_n": 5,
     "vol_mult": 2.0, "atr_mult": 2.5, "ema_period": 100,
@@ -96,7 +94,6 @@ SCAN_TIMEFRAMES = [
     ("4h",  ["240", "4h", "H4"],                 5, 365 * 6),
 ]
 
-# 👇 تغییر اصلی: DailyMACD فقط روی 4h و 1d معامله می‌کند 👇
 DAILY_MACD_TIMEFRAMES = [
     ("4h",  ["240", "4h", "H4"],                  5, 365 * 6),
     ("1d",  ["1440", "1d", "D", "D1", "day"],     6, 365),
@@ -146,7 +143,7 @@ def is_signal_ok(sig, filters):
 
 
 def compute_dynamic_size(vol30, profile):
-    if np.isnan(vol30) or vol30 <= 0:
+    if vol30 is None or np.isnan(vol30) or vol30 <= 0:
         return profile["target_vol"]
     clamped = max(VOL_FLOOR, min(VOL_CEIL, vol30))
     dyn = profile["target_vol"] / clamped
@@ -162,6 +159,37 @@ def hours_since_last_entry(log, log_key, current_bar_ts):
 
 def record_entry_bar(log, log_key, bar_ts):
     log.setdefault("last_entry_bar", {})[log_key] = int(bar_ts)
+
+
+def log_key_sym(log_key):
+    """✅ FIX: استخراج صحیح نماد از هر سه فرمت کلید:
+       'Donchian:ADA'      → 'ADA'
+       'ADA:SHORT'         → 'ADA'
+       'PAPER:ADA:LONG'    → 'ADA'
+    """
+    if not log_key:
+        return ""
+    if log_key.startswith("Donchian:"):
+        return log_key.split(":", 1)[1]
+    if log_key.startswith("PAPER:"):
+        parts = log_key.split(":")
+        return parts[1] if len(parts) >= 2 else log_key
+    if ":" in log_key:
+        return log_key.split(":", 1)[0]
+    return log_key
+
+
+def has_position(open_positions, sym, side):
+    """✅ FIX: تابع جاافتاده"""
+    pos = open_positions.get(sym)
+    if not pos:
+        return False
+    return (pos.get("side") or "").lower() == side.lower()
+
+
+def can_open_more(open_positions, pending_trades, max_total=MAX_TOTAL_POSITIONS):
+    """✅ FIX: تابع جاافتاده"""
+    return len(open_positions) + len(pending_trades) < max_total
 
 
 def send_telegram(text):
@@ -231,7 +259,8 @@ def format_daily_trade(sym, sig, notional, margin, balance, profile_key, profile
     emoji = "🟢" if side == "LONG" else "🔴"
     rr = sig["tp_pct"] / sig["sl_pct"] if sig["sl_pct"] > 0 else 0
     tf = sig.get("_tf_label", "1d")
-    vol30 = sig.get("_vol30", 0) * 100
+    v_raw = sig.get("_vol30", 0)
+    vol30 = (v_raw * 100) if not pd.isna(v_raw) else 0
     paper = "📝 PAPER | " if DAILY_PAPER_MODE else ""
     return (
         f"{paper}{emoji} <b>DailyMACD: {sym} {side}</b>\n"
@@ -244,7 +273,7 @@ def format_daily_trade(sym, sig, notional, margin, balance, profile_key, profile
         f"💰 اجرا: <b>{profile['name']}</b> | Notional ${notional:,.2f} "
         f"| مارجین ${margin:.2f} ({LEVERAGE}×)\n"
         f"🏦 موجودی: ${balance:,.2f}\n"
-        f"{_sizes_block_risk(sig.get('_vol30', 0), profile_key)}"
+        f"{_sizes_block_risk(v_raw if not pd.isna(v_raw) else 0, profile_key)}"
         f"⏱ Cooldown: {DAILY_COOLDOWN_HOURS}h\n"
     )
 
@@ -655,6 +684,17 @@ def fetch_daily_macd_tf(sym, tf_label):
     return None, bpy
 
 
+def _get_price_safe(sym, interval="60", fallback=None):
+    """✅ FIX: قیمت با fallback ایمن"""
+    try:
+        k = get_klines(sym, interval)
+        if k:
+            return float(k[-1]["close"])
+    except Exception:
+        pass
+    return fallback
+
+
 def run_scan():
     now = datetime.now(timezone.utc)
     today_str = now.strftime("%Y-%m-%d")
@@ -708,23 +748,20 @@ def run_scan():
         return 1
 
     newly_closed = []
-    new_trades = []
-
-    def log_key_sym(log_key):
-        return log_key.split(":", 1)[-1]
+    new_trades = []  # ✅ همه به فرمت ("استراتژی", sym, sig, notional, margin)
 
     def count_strategy_total(strategy):
         return sum(1 for v in log["open_entries"].values()
                    if v.get("strategy") == strategy)
 
-    # PHASE 1a: Donchian EXITS
+    # ============ PHASE 1a: Donchian EXITS ============
     if ENABLE_DONCHIAN:
         for log_key in list(log["open_entries"].keys()):
             info = log["open_entries"].get(log_key)
             if not info or info.get("strategy") != "Donchian":
                 continue
-            sym = log_key_sym(log_key)
-            if sym not in open_positions:
+            sym = info.get("symbol") or log_key_sym(log_key)
+            if not sym or sym not in open_positions:
                 continue
             pos_side = info.get("side", "LONG")
             entry_tf = info.get("tf", "1h")
@@ -744,8 +781,7 @@ def run_scan():
                     continue
                 if not close_position(open_positions[sym]):
                     continue
-                k1h = get_klines(sym, "60")
-                price = float(k1h[-1]["close"])
+                price = _get_price_safe(sym, "60", fallback=info.get("entry"))
                 ep = info["entry"]
                 pnl = ((price - ep) if pos_side == "LONG" else (ep - price)) / ep * 100
                 log["open_entries"].pop(log_key)
@@ -760,13 +796,15 @@ def run_scan():
             except Exception as e:
                 print(f"  [DN {sym}] exit error: {e}")
 
-    # PHASE 1b: DailyMACD EXITS
+    # ============ PHASE 1b: DailyMACD EXITS ============
     if ENABLE_DAILY:
         for log_key in list(log["open_entries"].keys()):
             info = log["open_entries"].get(log_key)
             if not info or info.get("strategy") != "DailyMACD":
                 continue
-            sym = log_key_sym(log_key)
+            sym = info.get("symbol") or log_key_sym(log_key)
+            if not sym:
+                continue
             is_paper = info.get("paper", False)
             if not is_paper and sym not in open_positions:
                 continue
@@ -809,12 +847,14 @@ def run_scan():
             except Exception as e:
                 print(f"  [DM {sym}] exit error: {e}")
 
-    # PHASE 2: SL/TP auto-close
+    # ============ PHASE 2: SL/TP auto-close & cleanup ============
     for log_key in list(log["open_entries"].keys()):
         info = log["open_entries"].get(log_key)
         if not info:
             continue
-        sym = log_key_sym(log_key)
+        sym = info.get("symbol") or log_key_sym(log_key)
+        if not sym:
+            continue
         is_paper = info.get("paper", False)
         strategy = info.get("strategy", "Unknown")
         side = info.get("side", "LONG")
@@ -824,23 +864,22 @@ def run_scan():
         if ep <= 0:
             continue
 
+        # آ). پوزیشن زنده‌ای که روی صرافی نیست → بسته شده توسط SL/TP صرافی
         if not is_paper and sym not in open_positions:
-            try:
-                k = get_klines(sym, "60")
-                price = float(k[-1]["close"])
-                pnl = ((price - ep) if side == "LONG" else (ep - price)) / ep * 100
-                log["open_entries"].pop(log_key)
-                rec = {"symbol": sym, "strategy": strategy, "side": side,
-                       "entry": ep, "exit": price, "pnl_pct": round(pnl, 2),
-                       "tf": info.get("tf", "1h"), "close_reason": "SL/TP",
-                       "paper": False}
-                log["closed_trades"].append(rec)
-                newly_closed.append(rec)
-                print(f"  [CLOSED-AUTO] {strategy} {sym} {side} -> {pnl:+.2f}%")
-            except Exception as e:
-                print(f"  [{sym}] close calc error: {e}")
+            print(f"  [{sym}] LIVE position not on exchange — cleaning log entry")
+            price = _get_price_safe(sym, "60", fallback=ep)
+            pnl = ((price - ep) if side == "LONG" else (ep - price)) / ep * 100
+            log["open_entries"].pop(log_key)
+            rec = {"symbol": sym, "strategy": strategy, "side": side,
+                   "entry": ep, "exit": price, "pnl_pct": round(pnl, 2),
+                   "tf": info.get("tf", "1h"), "close_reason": "SL/TP (exchange)",
+                   "paper": False}
+            log["closed_trades"].append(rec)
+            newly_closed.append(rec)
+            print(f"  [CLOSED-AUTO] {strategy} {sym} {side} -> {pnl:+.2f}%")
             continue
 
+        # ب). PAPER → شبیه‌سازی SL/TP
         if is_paper and sl > 0 and tp > 0:
             try:
                 if strategy == "DailyMACD":
@@ -850,26 +889,21 @@ def run_scan():
                         continue
                     price = float(df_tf["close"].iloc[-1])
                 else:
-                    k = get_klines(sym, "60")
-                    if not k:
+                    price = _get_price_safe(sym, "60", fallback=None)
+                    if price is None:
                         continue
-                    price = float(k[-1]["close"])
                 hit = False
                 reason = ""
                 if side == "LONG":
                     if price <= sl:
-                        hit = True
-                        reason = "SL (paper)"
+                        hit = True; reason = "SL (paper)"
                     elif price >= tp:
-                        hit = True
-                        reason = "TP (paper)"
+                        hit = True; reason = "TP (paper)"
                 else:
                     if price >= sl:
-                        hit = True
-                        reason = "SL (paper)"
+                        hit = True; reason = "SL (paper)"
                     elif price <= tp:
-                        hit = True
-                        reason = "TP (paper)"
+                        hit = True; reason = "TP (paper)"
                 if not hit:
                     continue
                 pnl = ((price - ep) if side == "LONG" else (ep - price)) / ep * 100
@@ -884,30 +918,28 @@ def run_scan():
             except Exception as e:
                 print(f"  [{strategy}-paper {sym}] SL/TP check error: {e}")
 
-    # PHASE 3: NEW ENTRIES
+    # ============ PHASE 3: NEW ENTRIES ============
     if kill_on:
         print("\n  Entries skipped (kill switch active)")
     else:
         newly_opened_symbols = set()
 
-        # 3a. Donchian
+        # -------- 3a. Donchian --------
         if ENABLE_DONCHIAN:
             for sym in DONCHIAN_SYMBOLS:
                 if sym in open_positions or sym in newly_opened_symbols:
                     continue
-                if count_strategy_total("Donchian") + len([t for t in new_trades if t[0] == "Donchian"]) >= MAX_DONCHIAN_POSITIONS:
+                if (count_strategy_total("Donchian")
+                        + len([t for t in new_trades if t[0] == "Donchian"])
+                        >= MAX_DONCHIAN_POSITIONS):
                     print(f"  Max Donchian ({MAX_DONCHIAN_POSITIONS}) reached")
                     break
                 if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
                     print(f"  Max total ({MAX_TOTAL_POSITIONS}) reached")
                     break
 
-                try:
-                    k1h = get_klines(sym, "60")
-                    if not k1h or len(k1h) < 5:
-                        continue
-                    current_price = float(k1h[-1]["close"])
-                except Exception:
+                current_price = _get_price_safe(sym, "60", fallback=None)
+                if current_price is None:
                     continue
 
                 tf_data = fetch_timeframes(sym, DONCHIAN_PARAMS["min_bars"] + 50, bars=500)
@@ -963,24 +995,28 @@ def run_scan():
                     continue
 
                 log["open_entries"][f"Donchian:{sym}"] = {
+                    "symbol": sym,                                  # ✅ FIX: symbol اضافه شد
                     "strategy": "Donchian", "side": sig["side"], "entry": sig["entry"],
                     "sl": sig["sl"], "tp": sig["tp"], "margin": margin,
                     "tf": sig["_tf_label"], "_bar_ts": sig.get("_bar_ts"),
                     "profile": ACTIVE_DONCHIAN_PROFILE_KEY, "paper": False,
                 }
-                new_trades.append(("Donchian", sym, sig, notional, margin))
+                new_trades.append(("Donchian", sym, sig, notional, margin))  # ✅ 5-tuple
                 newly_opened_symbols.add(sym)
                 print(f"  [Donchian {sig['_tf_label']}] {sig['side']} {sym} "
                       f"@ {fmt_price(sig['entry'])} | {sf*100:.0f}% spot")
 
-        # 3b. DailyMACD (فقط 4h و 1d)
+        # -------- 3b. DailyMACD --------
         if ENABLE_DAILY:
             for sym in DAILY_SYMBOLS:
                 if not DAILY_PAPER_MODE and (sym in open_positions or sym in newly_opened_symbols):
                     continue
-                if DAILY_PAPER_MODE and f"DailyMACD:{sym}" in log["open_entries"]:
+                # ✅ FIX: چک صحیح paper
+                if DAILY_PAPER_MODE and any(k.startswith(f"PAPER:{sym}:") for k in log["open_entries"]):
                     continue
-                if count_strategy_total("DailyMACD") + len([t for t in new_trades if t[0] == "DailyMACD"]) >= MAX_DAILY_POSITIONS:
+                if (count_strategy_total("DailyMACD")
+                        + len([t for t in new_trades if t[0] == "DailyMACD"])
+                        >= MAX_DAILY_POSITIONS):
                     print(f"  Max DailyMACD ({MAX_DAILY_POSITIONS}) reached")
                     break
                 if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
@@ -991,7 +1027,8 @@ def run_scan():
                 for tf_label, iv, tf_prio, bpy in DAILY_MACD_TIMEFRAMES:
                     try:
                         df_tf, _bpy = fetch_daily_macd_tf(sym, tf_label)
-                        if df_tf is None: continue
+                        if df_tf is None:
+                            continue
                         sigs = detect_daily_macd_signals(df_tf, tf_label, bpy)
                         for s in sigs:
                             if s["action"].startswith("ENTRY_"):
@@ -999,68 +1036,95 @@ def run_scan():
                                 s["_tf_label"] = tf_label
                                 s["_bpy"] = bpy
                                 sigs_by_side[s["side"]].append(s)
-                    except Exception: continue
+                    except Exception:
+                        continue
 
                 for side in ("LONG", "SHORT"):
                     side_sigs = sigs_by_side[side]
-                    if not side_sigs: continue
+                    if not side_sigs:
+                        continue
                     side_sigs.sort(key=lambda x: x["_tf_prio"], reverse=True)
                     sig = side_sigs[0]
                     tf_label = sig["_tf_label"]
                     log_key = (f"PAPER:{sym}:{side}" if DAILY_PAPER_MODE else f"{sym}:{side}")
 
-                    if log_key in log["open_entries"]: continue
-                    if not DAILY_PAPER_MODE and has_position(open_positions, sym, side): continue
-                    if not DAILY_PAPER_MODE and not can_open_more(): break
+                    if log_key in log["open_entries"]:
+                        continue
+                    if not DAILY_PAPER_MODE and has_position(open_positions, sym, side):
+                        continue
+                    if not DAILY_PAPER_MODE and not can_open_more(open_positions, new_trades):
+                        break
 
                     cooldown_key = f"DailyMACD:{sym}:{side}"
                     bar_ts = sig.get("_bar_ts")
-                    if bar_ts and hours_since_last_entry(log, cooldown_key, bar_ts) < DAILY_COOLDOWN_HOURS: continue
+                    if bar_ts and hours_since_last_entry(log, cooldown_key, bar_ts) < DAILY_COOLDOWN_HOURS:
+                        continue
 
                     ok, reason = is_signal_ok(sig, FILTERS_DAILY)
-                    if not ok: continue
+                    if not ok:
+                        continue
 
+                    # بررسی قیمت فعلی
                     try:
                         df_tf_check, _ = fetch_daily_macd_tf(sym, tf_label)
-                        if df_tf_check is None: continue
+                        if df_tf_check is None:
+                            continue
                         current_price = float(df_tf_check["close"].iloc[-1])
-                    except Exception: continue
+                    except Exception:
+                        continue
 
-                    if side == "LONG" and not (sig["sl"] < current_price < sig["tp"]): continue
-                    if side == "SHORT" and not (sig["tp"] < current_price < sig["sl"]): continue
+                    if side == "LONG" and not (sig["sl"] < current_price < sig["tp"]):
+                        continue
+                    if side == "SHORT" and not (sig["tp"] < current_price < sig["sl"]):
+                        continue
 
-                    risk_amount = balance_usd * RISK_PCT_PER_TRADE
-                    sl_frac = sig["sl_pct"] / 100.0
-                    notional = min(risk_amount / sl_frac, max_notional)
+                    # ✅ FIX: سایز بر اساس پروفایل (نه متغیرهای تعریف‌نشده)
+                    vol30 = sig.get("_vol30", 0.30)
+                    if pd.isna(vol30):
+                        vol30 = 0.30
+                    size_frac = compute_dynamic_size(vol30, DAILY_PROFILE)
+                    notional = min(balance_usd * size_frac, balance_usd * MAX_NOTIONAL_PCT)
                     margin = max(notional / LEVERAGE, 1.0)
 
                     if DAILY_PAPER_MODE:
-                        sig["_paper"] = True; sig["_tf_label"] = tf_label
+                        sig["_paper"] = True
+                        sig["_tf_label"] = tf_label
                         log["open_entries"][log_key] = {
                             "symbol": sym, "strategy": "DailyMACD", "side": side,
                             "entry": sig["entry"], "sl": sig["sl"], "tp": sig["tp"],
                             "margin": margin, "tf": tf_label, "paper": True,
                         }
-                        if bar_ts: record_entry_bar(log, cooldown_key, bar_ts)
-                        new_trades.append((sym, sig, margin))
-                        print(f"  📝 [PAPER {tf_label}] DailyMACD {side} {sym} @ {fmt_price(sig['entry'])}")
+                        if bar_ts:
+                            record_entry_bar(log, cooldown_key, bar_ts)
+                        new_trades.append(("DailyMACD", sym, sig, notional, margin))  # ✅ 5-tuple
+                        print(f"  📝 [PAPER {tf_label}] DailyMACD {side} {sym} "
+                              f"@ {fmt_price(sig['entry'])} | {size_frac*100:.1f}%")
                     else:
                         coid = f"DailyMACD-{tf_label}-{side}-{sym}-{int(now.timestamp())}"
-                        sl_r = round_price(sig["sl"], sig["entry"]); tp_r = round_price(sig["tp"], sig["entry"])
+                        sl_r = round_price(sig["sl"], sig["entry"])
+                        tp_r = round_price(sig["tp"], sig["entry"])
                         try:
-                            resp = open_position(sym, side.lower(), margin, LEVERAGE, sl_r, tp_r, coid)
-                        except Exception as e: continue
-                        if resp is None or resp.get("idempotent"): continue
-                        
-                        sig["_paper"] = False; sig["_tf_label"] = tf_label
+                            resp = open_position(sym, side.lower(), margin,
+                                                 LEVERAGE, sl_r, tp_r, coid)
+                        except Exception as e:
+                            print(f"  [DM {sym}] open error: {e}")
+                            continue
+                        if resp is None or resp.get("idempotent"):
+                            continue
+
+                        sig["_paper"] = False
+                        sig["_tf_label"] = tf_label
                         log["open_entries"][log_key] = {
                             "symbol": sym, "strategy": "DailyMACD", "side": side,
                             "entry": sig["entry"], "sl": sig["sl"], "tp": sig["tp"],
                             "margin": margin, "tf": tf_label, "paper": False,
                         }
-                        if bar_ts: record_entry_bar(log, cooldown_key, bar_ts)
-                        new_trades.append((sym, sig, margin))
-                        print(f"  🟢 [LIVE {tf_label}] DailyMACD {side} {sym} @ {fmt_price(sig['entry'])}")
+                        if bar_ts:
+                            record_entry_bar(log, cooldown_key, bar_ts)
+                        new_trades.append(("DailyMACD", sym, sig, notional, margin))  # ✅ 5-tuple
+                        newly_opened_symbols.add(sym)  # ✅ FIX: اضافه شد
+                        print(f"  🟢 [LIVE {tf_label}] DailyMACD {side} {sym} "
+                              f"@ {fmt_price(sig['entry'])} | {size_frac*100:.1f}%")
 
     save_log(log)
 
@@ -1083,6 +1147,7 @@ def run_scan():
     if new_trades:
         dn_new = [t for t in new_trades if t[0] == "Donchian"]
         dm_new = [t for t in new_trades if t[0] == "DailyMACD"]
+
         if dn_new:
             msg_blocks.append(
                 f"<b>🔔 Donchian — {now.strftime('%H:%M')} UTC</b>\n"
@@ -1114,7 +1179,9 @@ def run_scan():
         msg_blocks.append(format_strategy_summary(log, "Donchian",  "📊 Donchian Stats"))
 
     if msg_blocks:
-        send_telegram("\n\n".join(msg_blocks))
+        ok = send_telegram("\n\n".join(msg_blocks))
+        if not ok:
+            print("  [warn] Telegram send failed")
 
     print(f"\nResult: {len(new_trades)} new | {len(newly_closed)} closed"
           f"{' | KILL SWITCH ACTIVE' if kill_on else ''}")
