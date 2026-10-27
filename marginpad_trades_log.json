@@ -55,17 +55,6 @@
       "tf": "1h",
       "paper": false
     },
-    "ENA:LONG": {
-      "symbol": "ENA",
-      "strategy": "DailyMACD",
-      "side": "LONG",
-      "entry": 0.20908,
-      "sl": 0.19848843892193133,
-      "tp": 0.2302631221561373,
-      "margin": 23.240164583451996,
-      "tf": "1h",
-      "paper": false
-    },
     "NEAR:SHORT": {
       "symbol": "NEAR",
       "strategy": "DailyMACD",
@@ -74,6 +63,28 @@
       "sl": 4.468763260243335,
       "tp": 4.337473479513329,
       "margin": 119.0392795185622,
+      "tf": "5m",
+      "paper": false
+    },
+    "PEPE:SHORT": {
+      "symbol": "PEPE",
+      "strategy": "DailyMACD",
+      "side": "SHORT",
+      "entry": 4.3011e-06,
+      "sl": 4.38802923947668e-06,
+      "tp": 4.127241521046641e-06,
+      "margin": 58.25782809084167,
+      "tf": "30m",
+      "paper": false
+    },
+    "APT:LONG": {
+      "symbol": "APT",
+      "strategy": "DailyMACD",
+      "side": "LONG",
+      "entry": 0.6839,
+      "sl": 0.6799212815143237,
+      "tp": 0.6918574369713524,
+      "margin": 141.2934,
       "tf": "5m",
       "paper": false
     }
@@ -100,6 +111,17 @@
       "tf": "5m",
       "paper": false,
       "close_reason": "SL/TP"
+    },
+    {
+      "symbol": "ENA",
+      "strategy": "DailyMACD",
+      "side": "LONG",
+      "entry": 0.20908,
+      "exit": 0.20758,
+      "pnl_pct": -0.72,
+      "tf": "1h",
+      "paper": false,
+      "close_reason": "MACD-EXIT (1h)"
     }
   ],
   "last_entry_bar": {
@@ -111,6 +133,8 @@
     "DailyMACD:SUI:SHORT": 1793037600,
     "DailyMACD:APT:SHORT": 1793037600,
     "DailyMACD:ENA:LONG": 1793077200,
-    "DailyMACD:NEAR:SHORT": 1793081400
+    "DailyMACD:NEAR:SHORT": 1793081400,
+    "DailyMACD:PEPE:SHORT": 1793082600,
+    "DailyMACD:APT:LONG": 1793084100
   }
 }
