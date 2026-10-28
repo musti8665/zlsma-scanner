@@ -1,4 +1,4 @@
-name: Virtual Paper Trading
+name: Alpaca Paper Trading
 
 on:
   schedule:
@@ -30,10 +30,3 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TG_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT }}
         run: python acmts_scanner.py
-
-      - name: Commit and save virtual wallet
-        if: always()
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore: auto-update virtual wallet [skip ci]"
-          file_pattern: "virtual_wallet.json"
