@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Binance Testnet Triple-Strategy Scanner (Donchian + DailyMACD + C_BE_trail)
+Virtual Paper Trading Scanner (Donchian + DailyMACD + C_BE_trail)
 ======================================================================
 """
 
@@ -12,110 +12,42 @@ import time
 import requests
 import numpy as np
 import pandas as pd
-import ccxt
 from datetime import datetime, timezone
 from pathlib import Path
 from numpy.lib.stride_tricks import sliding_window_view
 
-# فعال‌سازی هر سه استراتژی
 ENABLE_DONCHIAN = True
 ENABLE_DAILY    = True
 ENABLE_CBT      = True
 
-# ============================================================
-# 👇 کلیدهای بایننس تست‌نت مستقیماً اینجا قرار گرفتند 👇
-# ============================================================
-API_KEY = os.environ.get("BINANCE_API_KEY", "SJWT1yxbODqd5mbSii8SLzbaht9oIteg1oKjORjKuL6fcrEY4nZQFCiQG8kanVEd").strip()
-SECRET_KEY = os.environ.get("BINANCE_API_SECRET", "NTLgBvIOedLJhk8ucjp7lbfXmROkmPjEHZEaHJyy59ve4zvC8aX3tqQgKTGjIyd2").strip()
 TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo").strip()
-TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip() # برای تلگرام باید آیدی عددی خودت رو در Secrets گیت‌هاب بذاری
-
-if not API_KEY or not SECRET_KEY:
-    print("FATAL: BINANCE_API_KEY or BINANCE_API_SECRET missing")
-    sys.exit(1)
-
-# اتصال به بایننس تست‌نت
-exchange = ccxt.binance({
-    'apiKey': API_KEY,
-    'secret': SECRET_KEY,
-    'enableRateLimit': True,
-    'options': {'defaultType': 'future'}
-})
-exchange.set_sandbox_mode(True) # فعال‌سازی حالت تست‌نت
+TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 SYMBOLS = [
-    "ADA/USDT", "AVAX/USDT", "LINK/USDT", "LTC/USDT",
-    "ENA/USDT", "ATOM/USDT", "NEAR/USDT", "ARB/USDT", "OP/USDT", "PEPE/USDT", "SHIB/USDT", "SUI/USDT",
-    "APT/USDT", "INJ/USDT", "TIA/USDT", "SEI/USDT", "WIF/USDT", "LDO/USDT", "UNI/USDT", "AAVE/USDT", "FIL/USDT", "RENDER/USDT",
+    "ADA", "AVAX", "LINK", "LTC", "ENA", "ATOM", "NEAR", "ARB", "OP", "PEPE", "SHIB", "SUI",
+    "APT", "INJ", "TIA", "SEI", "WIF", "LDO", "UNI", "AAVE", "FIL", "RENDER",
 ]
 
-# ============================================================
 # پارامترهای استراتژی‌ها
-# ============================================================
 DONCHIAN_PARAMS = {"entry_n": 10, "exit_n": 5, "vol_mult": 2.0, "atr_mult": 2.5, "ema_period": 100, "min_bars": 200, "tp_rr": 5.0}
 DAILY_MACD_PARAMS = {"pivot_period": 8, "qqe_rsi": 20, "qqe_sf": 9, "macd_fast": 5, "macd_slow": 13, "macd_signal": 10, "sl_atr_mult": 2.5, "tp_rr": 2.0, "min_bars": 60, "vol_period": 30, "kijun_p": 20}
-
 CBT_PVT=50; CBT_TL=2; CBT_SR_EX=3; CBT_KIJUN_LEN=36; CBT_ATR_LEN=14; CBT_ATR_BASE=250; CBT_ATR_THR=0.90
 CBT_QQE_RP=14; CBT_QQE_SM=5; CBT_QQE_F=3.0; CBT_SL_MULT=2.5; CBT_TP_RR=2.5
 CBT_BE_AT_R=1.0; CBT_TRAIL_R=1.5; CBT_TRAIL_ATR=1.2; CBT_MAX_BARS=40; CBT_MIN_BARS=500
 
 LEVERAGE = 10
 MAX_TOTAL_POSITIONS = 8
-RISK_PER_TRADE_PCT = 0.02 # ۲ درصد از موجودی برای هر معامله
+RISK_PER_TRADE_PCT = 0.02
+WALLET_FILE = Path("virtual_wallet.json")
 
-# ============================================================
-# توابع کمکی بایننس
-# ============================================================
-def get_balance():
-    try:
-        bal = exchange.fetch_balance()
-        return float(bal['USDT']['free'])
-    except Exception as e:
-        print(f"Balance error: {e}")
-        return 0.0
+def load_wallet():
+    if WALLET_FILE.exists():
+        try: return json.loads(WALLET_FILE.read_text())
+        except: pass
+    return {"balance": 10000.0, "positions": {}}
 
-def get_positions():
-    try:
-        poss = exchange.fetch_positions()
-        return {p['symbol'].replace('/', ''): p for p in poss if float(p['contracts']) > 0}
-    except Exception as e:
-        print(f"Positions error: {e}")
-        return {}
-
-def get_klines_cached(symbol, timeframe):
-    try:
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=500)
-        if not ohlcv: return None
-        df = pd.DataFrame(ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-        df['time'] = pd.to_datetime(df['time'], unit='ms', utc=True)
-        return df.set_index('time').sort_index()
-    except Exception:
-        return None
-
-def open_position(symbol, side, margin, sl, tp):
-    try:
-        exchange.load_markets()
-        price = exchange.fetch_ticker(symbol)['last']
-        amount = (margin * LEVERAGE) / price
-        amount = float(exchange.amount_to_precision(symbol, amount))
-        
-        if amount <= 0: return None
-        
-        exchange.set_leverage(LEVERAGE, symbol)
-        order_side = 'buy' if side == 'LONG' else 'sell'
-        
-        order = exchange.create_order(symbol, 'market', order_side, amount)
-        
-        sl_side = 'sell' if side == 'LONG' else 'buy'
-        sl_price = float(exchange.price_to_precision(symbol, sl))
-        tp_price = float(exchange.price_to_precision(symbol, tp))
-        
-        exchange.create_order(symbol, 'STOP_MARKET', sl_side, amount, params={'stopPrice': sl_price, 'reduceOnly': True})
-        exchange.create_order(symbol, 'TAKE_PROFIT_MARKET', sl_side, amount, params={'stopPrice': tp_price, 'reduceOnly': True})
-        return order
-    except Exception as e:
-        print(f"Open error {symbol}: {e}")
-        return None
+def save_wallet(wallet):
+    WALLET_FILE.write_text(json.dumps(wallet, indent=2))
 
 def send_telegram(text):
     if not TG_TOKEN or not TG_CHAT: return False
@@ -125,9 +57,24 @@ def send_telegram(text):
         return r.status_code == 200
     except: return False
 
-# ============================================================
-# توابع محاسباتی
-# ============================================================
+def get_klines(sym, interval):
+    tf_map = {"1h": "60", "4h": "240", "30m": "30"}
+    bybit_interval = tf_map.get(interval, "60")
+    url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={sym}USDT&interval={bybit_interval}&limit=500"
+    try:
+        r = requests.get(url, timeout=10)
+        data = r.json()
+        if data.get('retCode') != 0: return None
+        lst = data['result']['list']
+        lst.reverse()
+        df = pd.DataFrame(lst, columns=['time', 'open', 'high', 'low', 'close', 'volume', 'turnover'])
+        df['time'] = pd.to_datetime(df['time'].astype(float), unit='ms', utc=True)
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        return df.set_index('time').sort_index()
+    except:
+        return None
+
 def compute_atr(df, length=14):
     h, l, c = df["high"].values, df["low"].values, df["close"].values
     tr = np.maximum(h - l, np.maximum(np.abs(h - np.roll(c, 1)), np.abs(l - np.roll(c, 1))))
@@ -254,7 +201,6 @@ def detect_donchian_signals(df, tf_label):
         if pd.isna(atr.iloc[i]) or pd.isna(ema.iloc[i]) or pd.isna(vol_ma.iloc[i]): continue
         atr_val = float(atr.iloc[i]); close_v = float(close.iloc[i]); ema_v = float(ema.iloc[i])
         vol_ok = float(volume.iloc[i]) > P["vol_mult"] * float(vol_ma.iloc[i])
-        
         if close_v > float(don_hi_entry.iloc[i]) and vol_ok and close_v > ema_v:
             sl_price = close_v - P["atr_mult"] * atr_val
             sl_dist = close_v - sl_price
@@ -309,51 +255,44 @@ def detect_daily_macd_signals(df, tf_label):
                 return [{"side": "SHORT", "entry": entry, "sl": sl, "tp": tp, "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100, "strategy": "DailyMACD", "_tf_label": tf_label}]
     return []
 
-# ============================================================
-# اجرای اصلی
-# ============================================================
 def run_scan():
     now = datetime.now(timezone.utc)
     print("=" * 70)
-    print(f"Binance TESTNET Scanner — {now.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"Virtual Paper Trading Scan — {now.strftime('%Y-%m-%d %H:%M UTC')}")
     
-    balance_usd = get_balance()
-    print(f"Testnet Balance: ${balance_usd:,.2f}")
-    if balance_usd < 10:
-        print("FATAL: Testnet balance too low.")
-        return 1
-
-    open_positions = get_positions()
-    print(f"Open Positions: {len(open_positions)}")
+    wallet = load_wallet()
+    balance = wallet["balance"]
+    positions = wallet["positions"]
+    
+    print(f"Virtual Balance: ${balance:,.2f}")
+    print(f"Open Positions: {len(positions)}")
     
     new_trades = []
-    newly_opened_symbols = set()
+    newly_opened = set()
 
     for sym in SYMBOLS:
-        clean_sym = sym.replace('/', '')
-        if clean_sym in open_positions or clean_sym in newly_opened_symbols:
+        if sym in positions or sym in newly_opened:
             continue
-        if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
-            print("Max total positions reached.")
+        if len(positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
             break
 
         print(f"Scanning {sym}...")
         symbol_signals = []
         
         if ENABLE_DONCHIAN:
-            df_1h = get_klines_cached(sym, "1h")
+            df_1h = get_klines(sym, "1h")
             if df_1h is not None:
                 sigs = detect_donchian_signals(df_1h, "1h")
                 if sigs: symbol_signals.extend(sigs)
         
         if ENABLE_DAILY:
-            df_4h = get_klines_cached(sym, "4h")
+            df_4h = get_klines(sym, "4h")
             if df_4h is not None:
                 sigs = detect_daily_macd_signals(df_4h, "4h")
                 if sigs: symbol_signals.extend(sigs)
                 
         if ENABLE_CBT:
-            df_30m = get_klines_cached(sym, "30m")
+            df_30m = get_klines(sym, "30m")
             if df_30m is not None:
                 sigs = detect_c_be_trail_signals(df_30m)
                 if sigs: symbol_signals.extend(sigs)
@@ -363,28 +302,38 @@ def run_scan():
 
         sides = set(s["side"] for s in symbol_signals)
         if len(sides) > 1:
-            print(f"  ⚠️ [{sym}] SKIP: conflicting signals")
             continue
 
         PRIORITY = {"CBT": 3, "Donchian": 2, "DailyMACD": 1}
         symbol_signals.sort(key=lambda s: PRIORITY.get(s["strategy"], 0), reverse=True)
         sig = symbol_signals[0]
 
-        margin_to_use = balance_usd * RISK_PER_TRADE_PCT
+        margin_to_use = balance * RISK_PER_TRADE_PCT
         
-        print(f"  🟢 SIGNAL: {sig['strategy']} {sig['side']} {sym}")
-        resp = open_position(sym, sig["side"], margin_to_use, sig["sl"], sig["tp"])
+        # ثبت معامله مجازی
+        positions[sym] = {
+            "strategy": sig["strategy"],
+            "side": sig["side"],
+            "entry": sig["entry"],
+            "sl": sig["sl"],
+            "tp": sig["tp"],
+            "margin": margin_to_use
+        }
+        wallet["balance"] -= margin_to_use # کسر مارجین از موجودی آزاد
         
-        if resp:
-            new_trades.append((sym, sig, margin_to_use))
-            newly_opened_symbols.add(clean_sym)
-            msg = (f"🟢 <b>Binance Testnet Trade</b>\n"
-                   f"استراتژی: {sig['strategy']} | نماد: {sym}\n"
-                   f"جهت: {sig['side']} | قیمت: {sig['entry']:.4f}\n"
-                   f"مارجین: ${margin_to_use:.2f}")
-            send_telegram(msg)
+        new_trades.append((sym, sig, margin_to_use))
+        newly_opened.add(sym)
+        
+        print(f"  🟢 VIRTUAL TRADE: {sig['strategy']} {sig['side']} {sym} @ {sig['entry']:.4f}")
+        
+        msg = (f"🟢 <b>Virtual Trade Opened</b>\n"
+               f"استراتژی: {sig['strategy']} | نماد: {sym}\n"
+               f"جهت: {sig['side']} | قیمت: {sig['entry']:.4f}\n"
+               f"مارجین: ${margin_to_use:.2f}")
+        send_telegram(msg)
 
-    print(f"\nResult: {len(new_trades)} new trades opened on Testnet.")
+    save_wallet(wallet)
+    print(f"\nResult: {len(new_trades)} new virtual trades opened.")
     return 0
 
 if __name__ == "__main__":
