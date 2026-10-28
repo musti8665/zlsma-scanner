@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Virtual Paper Trading Scanner (Donchian + DailyMACD + C_BE_trail)
-======================================================================
+Virtual Paper Trading Scanner (Donchian + DailyMACD + C_BE_trail) + Trailing & PnL
 """
 
 import os
@@ -20,7 +19,7 @@ ENABLE_DONCHIAN = True
 ENABLE_DAILY    = True
 ENABLE_CBT      = True
 
-TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo").strip()
+TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 SYMBOLS = [
@@ -28,7 +27,6 @@ SYMBOLS = [
     "APT", "INJ", "TIA", "SEI", "WIF", "LDO", "UNI", "AAVE", "FIL", "RENDER",
 ]
 
-# پارامترهای استراتژی‌ها
 DONCHIAN_PARAMS = {"entry_n": 10, "exit_n": 5, "vol_mult": 2.0, "atr_mult": 2.5, "ema_period": 100, "min_bars": 200, "tp_rr": 5.0}
 DAILY_MACD_PARAMS = {"pivot_period": 8, "qqe_rsi": 20, "qqe_sf": 9, "macd_fast": 5, "macd_slow": 13, "macd_signal": 10, "sl_atr_mult": 2.5, "tp_rr": 2.0, "min_bars": 60, "vol_period": 30, "kijun_p": 20}
 CBT_PVT=50; CBT_TL=2; CBT_SR_EX=3; CBT_KIJUN_LEN=36; CBT_ATR_LEN=14; CBT_ATR_BASE=250; CBT_ATR_THR=0.90
@@ -44,7 +42,7 @@ def load_wallet():
     if WALLET_FILE.exists():
         try: return json.loads(WALLET_FILE.read_text())
         except: pass
-    return {"balance": 10000.0, "positions": {}}
+    return {"balance": 10000.0, "positions": {}, "closed_trades": []}
 
 def save_wallet(wallet):
     WALLET_FILE.write_text(json.dumps(wallet, indent=2))
@@ -75,6 +73,20 @@ def get_klines(sym, interval):
     except:
         return None
 
+def get_current_price(sym):
+    url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={sym}USDT"
+    try:
+        r = requests.get(url, timeout=10)
+        data = r.json()
+        if data.get('retCode') == 0:
+            return float(data['result']['list'][0]['lastPrice'])
+    except:
+        pass
+    return None
+
+# ============================================================
+# محاسبات استراتژی‌ها (بدون تغییر)
+# ============================================================
 def compute_atr(df, length=14):
     h, l, c = df["high"].values, df["low"].values, df["close"].values
     tr = np.maximum(h - l, np.maximum(np.abs(h - np.roll(c, 1)), np.abs(l - np.roll(c, 1))))
@@ -255,17 +267,72 @@ def detect_daily_macd_signals(df, tf_label):
                 return [{"side": "SHORT", "entry": entry, "sl": sl, "tp": tp, "sl_pct": (sl-entry)/entry*100, "tp_pct": (entry-tp)/entry*100, "strategy": "DailyMACD", "_tf_label": tf_label}]
     return []
 
+# ============================================================
+# اجرای اصلی
+# ============================================================
 def run_scan():
     now = datetime.now(timezone.utc)
     print("=" * 70)
     print(f"Virtual Paper Trading Scan — {now.strftime('%Y-%m-%d %H:%M UTC')}")
     
     wallet = load_wallet()
-    balance = wallet["balance"]
-    positions = wallet["positions"]
+    positions = wallet.get("positions", {})
+    closed_trades = wallet.get("closed_trades", [])
     
-    print(f"Virtual Balance: ${balance:,.2f}")
-    print(f"Open Positions: {len(positions)}")
+    # ۱. بررسی پوزیشن‌های باز (محاسبه سود/ضرر و چک کردن SL/TP)
+    if positions:
+        print("\n--- Checking Open Positions ---")
+        
+    for sym in list(positions.keys()):
+        pos = positions[sym]
+        current_price = get_current_price(sym)
+        if current_price is None:
+            continue
+            
+        entry = pos["entry"]
+        side = pos["side"]
+        sl = pos["sl"]
+        tp = pos["tp"]
+        margin = pos["margin"]
+        
+        # محاسبه سود/ضرر
+        if side == "LONG":
+            pnl_pct = (current_price - entry) / entry * 100
+            hit_sl = current_price <= sl
+            hit_tp = current_price >= tp
+        else:
+            pnl_pct = (entry - current_price) / entry * 100
+            hit_sl = current_price >= sl
+            hit_tp = current_price <= tp
+            
+        pos["unrealized_pnl_pct"] = round(pnl_pct, 2)
+        print(f"  [{sym}] {side} | Entry: {entry:.4f} | Current: {current_price:.4f} | PnL: {pnl_pct:+.2f}%")
+        
+        # اگر به SL یا TP خورد، پوزیشن را ببند
+        if hit_sl or hit_tp:
+            reason = "SL" if hit_sl else "TP"
+            profit_usd = margin * LEVERAGE * (pnl_pct / 100)
+            wallet["balance"] += margin + profit_usd
+            
+            closed_record = {
+                "symbol": sym, "strategy": pos["strategy"], "side": side,
+                "entry": entry, "exit": current_price, "pnl_pct": round(pnl_pct, 2),
+                "reason": reason
+            }
+            closed_trades.append(closed_record)
+            del positions[sym]
+            
+            print(f"  🔴 CLOSED {sym} {side} ({reason}) | PnL: {pnl_pct:+.2f}%")
+            
+            msg = (f"🔴 <b>Virtual Trade Closed ({reason})</b>\n"
+                   f"نماد: {sym} | استراتژی: {pos['strategy']}\n"
+                   f"جهت: {side} | سود/ضرر: <b>{pnl_pct:+.2f}%</b>\n"
+                   f"موجودی جدید: ${wallet['balance']:,.2f}")
+            send_telegram(msg)
+
+    # ۲. اسکن برای پوزیشن‌های جدید
+    print(f"\n--- Scanning for New Signals ---")
+    print(f"Balance: ${wallet['balance']:,.2f} | Open Positions: {len(positions)}")
     
     new_trades = []
     newly_opened = set()
@@ -276,7 +343,6 @@ def run_scan():
         if len(positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
             break
 
-        print(f"Scanning {sym}...")
         symbol_signals = []
         
         if ENABLE_DONCHIAN:
@@ -308,23 +374,23 @@ def run_scan():
         symbol_signals.sort(key=lambda s: PRIORITY.get(s["strategy"], 0), reverse=True)
         sig = symbol_signals[0]
 
-        margin_to_use = balance * RISK_PER_TRADE_PCT
+        margin_to_use = wallet["balance"] * RISK_PER_TRADE_PCT
         
-        # ثبت معامله مجازی
         positions[sym] = {
             "strategy": sig["strategy"],
             "side": sig["side"],
             "entry": sig["entry"],
             "sl": sig["sl"],
             "tp": sig["tp"],
-            "margin": margin_to_use
+            "margin": margin_to_use,
+            "unrealized_pnl_pct": 0.0
         }
-        wallet["balance"] -= margin_to_use # کسر مارجین از موجودی آزاد
+        wallet["balance"] -= margin_to_use
         
         new_trades.append((sym, sig, margin_to_use))
         newly_opened.add(sym)
         
-        print(f"  🟢 VIRTUAL TRADE: {sig['strategy']} {sig['side']} {sym} @ {sig['entry']:.4f}")
+        print(f"  🟢 OPENED: {sig['strategy']} {sig['side']} {sym} @ {sig['entry']:.4f}")
         
         msg = (f"🟢 <b>Virtual Trade Opened</b>\n"
                f"استراتژی: {sig['strategy']} | نماد: {sym}\n"
@@ -332,8 +398,12 @@ def run_scan():
                f"مارجین: ${margin_to_use:.2f}")
         send_telegram(msg)
 
+    wallet["positions"] = positions
+    wallet["closed_trades"] = closed_trades
     save_wallet(wallet)
-    print(f"\nResult: {len(new_trades)} new virtual trades opened.")
+    
+    print(f"\nResult: {len(new_trades)} new trades opened.")
+    print(f"Final Balance: ${wallet['balance']:,.2f} | Open Positions: {len(positions)}")
     return 0
 
 if __name__ == "__main__":
