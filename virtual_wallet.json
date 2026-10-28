@@ -1,4 +1,5 @@
 {
   "balance": 10000.0,
-  "positions": {}
+  "positions": {},
+  "closed_trades": []
 }
