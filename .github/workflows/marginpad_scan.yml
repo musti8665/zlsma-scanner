@@ -27,12 +27,9 @@ jobs:
 
       - name: Run scanner
         env:
-          # کلیدهای بایننس از Secrets خوانده می‌شوند
-          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
-          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+          # اینجا فقط تلگرام رو ست می‌کنیم چون کلیدهای بایننس مستقیم تو کد هستن
           TELEGRAM_TOKEN: ${{ secrets.TG_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT }}
-          INTERVAL_MIN: "0"            
         run: python acmts_scanner.py
 
       - name: Commit and save trade logs
@@ -40,4 +37,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: auto-update trade log [skip ci]"
-          file_pattern: "binance_trades_log.json" 
+          file_pattern: "binance_trades_log.json"
