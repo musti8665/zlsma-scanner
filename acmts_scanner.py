@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Virtual Paper Trading Scanner (Donchian + DailyMACD + C_BE_trail) + Trailing & PnL
+Alpaca Paper Trading Scanner (Hybrid: Bybit Data + Alpaca Execution)
+======================================================================
 """
 
 import os
@@ -15,50 +16,107 @@ from datetime import datetime, timezone
 from pathlib import Path
 from numpy.lib.stride_tricks import sliding_window_view
 
+# ============================================================
+# 👇 کلیدهای Alpaca مستقیماً اینجا قرار گرفتند 👇
+# ============================================================
+ALPACA_KEY = "PK4UHLFQBQQNWKGATLMUPYP7CH"
+ALPACA_SECRET = "4zYsHprZagiQYyVDX8q22yypaSPZHEmSs9uXB4SXf35U"
+
+# برای تلگرام (اگر آیدی چت داری اینجا بگذار، وگرنه خالی بگذار)
+TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo").strip()
+TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip() 
+
+ALPACA_BASE_URL = "https://paper-api.alpaca.markets/v2"
+ALPACA_HEADERS = {
+    "APCA-API-KEY-ID": ALPACA_KEY,
+    "APCA-API-SECRET-KEY": ALPACA_SECRET,
+    "accept": "application/json",
+    "content-type": "application/json"
+}
+
+# ارزهایی که در Alpaca موجود هستند
+SYMBOLS = [
+    "BTC/USD", "ETH/USD", "SOL/USD", "ADA/USD", "AVAX/USD", 
+    "LINK/USD", "LTC/USD", "ATOM/USD", "NEAR/USD", "UNI/USD", 
+    "AAVE/USD", "FIL/USD", "SHIB/USD", "DOGE/USD"
+]
+
 ENABLE_DONCHIAN = True
 ENABLE_DAILY    = True
 ENABLE_CBT      = True
 
-TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
-TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-
-SYMBOLS = [
-    "ADA", "AVAX", "LINK", "LTC", "ENA", "ATOM", "NEAR", "ARB", "OP", "PEPE", "SHIB", "SUI",
-    "APT", "INJ", "TIA", "SEI", "WIF", "LDO", "UNI", "AAVE", "FIL", "RENDER",
-]
-
+# پارامترهای استراتژی‌ها
 DONCHIAN_PARAMS = {"entry_n": 10, "exit_n": 5, "vol_mult": 2.0, "atr_mult": 2.5, "ema_period": 100, "min_bars": 200, "tp_rr": 5.0}
 DAILY_MACD_PARAMS = {"pivot_period": 8, "qqe_rsi": 20, "qqe_sf": 9, "macd_fast": 5, "macd_slow": 13, "macd_signal": 10, "sl_atr_mult": 2.5, "tp_rr": 2.0, "min_bars": 60, "vol_period": 30, "kijun_p": 20}
 CBT_PVT=50; CBT_TL=2; CBT_SR_EX=3; CBT_KIJUN_LEN=36; CBT_ATR_LEN=14; CBT_ATR_BASE=250; CBT_ATR_THR=0.90
 CBT_QQE_RP=14; CBT_QQE_SM=5; CBT_QQE_F=3.0; CBT_SL_MULT=2.5; CBT_TP_RR=2.5
 CBT_BE_AT_R=1.0; CBT_TRAIL_R=1.5; CBT_TRAIL_ATR=1.2; CBT_MAX_BARS=40; CBT_MIN_BARS=500
 
-LEVERAGE = 10
-MAX_TOTAL_POSITIONS = 8
-RISK_PER_TRADE_PCT = 0.02
-WALLET_FILE = Path("virtual_wallet.json")
+MAX_TOTAL_POSITIONS = 5
+RISK_PER_TRADE_PCT = 0.05 # ۵ درصد از موجودی
 
-def load_wallet():
-    if WALLET_FILE.exists():
-        try: return json.loads(WALLET_FILE.read_text())
-        except: pass
-    return {"balance": 10000.0, "positions": {}, "closed_trades": []}
-
-def save_wallet(wallet):
-    WALLET_FILE.write_text(json.dumps(wallet, indent=2))
-
-def send_telegram(text):
-    if not TG_TOKEN or not TG_CHAT: return False
+# ============================================================
+# توابع Alpaca
+# ============================================================
+def get_balance():
     try:
-        r = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={"chat_id": TG_CHAT, "text": text, "parse_mode": "HTML"}, timeout=15)
-        return r.status_code == 200
-    except: return False
+        r = requests.get(f"{ALPACA_BASE_URL}/account", headers=ALPACA_HEADERS, timeout=10)
+        return float(r.json().get("cash", 0.0))
+    except Exception as e:
+        print(f"Alpaca Balance error: {e}")
+        return 0.0
+
+def get_positions():
+    try:
+        r = requests.get(f"{ALPACA_BASE_URL}/positions", headers=ALPACA_HEADERS, timeout=10)
+        return {p["symbol"].replace("/", ""): p for p in r.json()}
+    except Exception as e:
+        print(f"Alpaca Positions error: {e}")
+        return {}
+
+def open_position(symbol, side, margin):
+    try:
+        current_price = get_current_price(symbol)
+        if current_price is None: return None
+        
+        qty = margin / current_price
+        qty = float(f"{qty:.6f}")
+        
+        order_side = "buy" if side == "LONG" else "sell"
+        
+        body = {
+            "symbol": symbol,
+            "qty": str(qty),
+            "side": order_side,
+            "type": "market",
+            "time_in_force": "gtc"
+        }
+        r = requests.post(f"{ALPACA_BASE_URL}/orders", headers=ALPACA_HEADERS, json=body, timeout=10)
+        return r.json()
+    except Exception as e:
+        print(f"Alpaca Open error {symbol}: {e}")
+        return None
+
+# ============================================================
+# توابع دریافت دیتای بازار (از Bybit - عمومی)
+# ============================================================
+def get_current_price(sym):
+    clean_sym = sym.replace("/", "")
+    url = f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={clean_sym}"
+    try:
+        r = requests.get(url, timeout=10)
+        data = r.json()
+        if data.get('retCode') == 0:
+            return float(data['result']['list'][0]['lastPrice'])
+    except:
+        pass
+    return None
 
 def get_klines(sym, interval):
+    clean_sym = sym.replace("/", "")
     tf_map = {"1h": "60", "4h": "240", "30m": "30"}
     bybit_interval = tf_map.get(interval, "60")
-    url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={sym}USDT&interval={bybit_interval}&limit=500"
+    url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={clean_sym}&interval={bybit_interval}&limit=500"
     try:
         r = requests.get(url, timeout=10)
         data = r.json()
@@ -73,19 +131,16 @@ def get_klines(sym, interval):
     except:
         return None
 
-def get_current_price(sym):
-    url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={sym}USDT"
+def send_telegram(text):
+    if not TG_TOKEN or not TG_CHAT: return False
     try:
-        r = requests.get(url, timeout=10)
-        data = r.json()
-        if data.get('retCode') == 0:
-            return float(data['result']['list'][0]['lastPrice'])
-    except:
-        pass
-    return None
+        r = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+            json={"chat_id": TG_CHAT, "text": text, "parse_mode": "HTML"}, timeout=15)
+        return r.status_code == 200
+    except: return False
 
 # ============================================================
-# محاسبات استراتژی‌ها (بدون تغییر)
+# توابع محاسباتی استراتژی‌ها
 # ============================================================
 def compute_atr(df, length=14):
     h, l, c = df["high"].values, df["low"].values, df["close"].values
@@ -273,76 +328,29 @@ def detect_daily_macd_signals(df, tf_label):
 def run_scan():
     now = datetime.now(timezone.utc)
     print("=" * 70)
-    print(f"Virtual Paper Trading Scan — {now.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"Alpaca Paper Scan — {now.strftime('%Y-%m-%d %H:%M UTC')}")
     
-    wallet = load_wallet()
-    positions = wallet.get("positions", {})
-    closed_trades = wallet.get("closed_trades", [])
-    
-    # ۱. بررسی پوزیشن‌های باز (محاسبه سود/ضرر و چک کردن SL/TP)
-    if positions:
-        print("\n--- Checking Open Positions ---")
-        
-    for sym in list(positions.keys()):
-        pos = positions[sym]
-        current_price = get_current_price(sym)
-        if current_price is None:
-            continue
-            
-        entry = pos["entry"]
-        side = pos["side"]
-        sl = pos["sl"]
-        tp = pos["tp"]
-        margin = pos["margin"]
-        
-        # محاسبه سود/ضرر
-        if side == "LONG":
-            pnl_pct = (current_price - entry) / entry * 100
-            hit_sl = current_price <= sl
-            hit_tp = current_price >= tp
-        else:
-            pnl_pct = (entry - current_price) / entry * 100
-            hit_sl = current_price >= sl
-            hit_tp = current_price <= tp
-            
-        pos["unrealized_pnl_pct"] = round(pnl_pct, 2)
-        print(f"  [{sym}] {side} | Entry: {entry:.4f} | Current: {current_price:.4f} | PnL: {pnl_pct:+.2f}%")
-        
-        # اگر به SL یا TP خورد، پوزیشن را ببند
-        if hit_sl or hit_tp:
-            reason = "SL" if hit_sl else "TP"
-            profit_usd = margin * LEVERAGE * (pnl_pct / 100)
-            wallet["balance"] += margin + profit_usd
-            
-            closed_record = {
-                "symbol": sym, "strategy": pos["strategy"], "side": side,
-                "entry": entry, "exit": current_price, "pnl_pct": round(pnl_pct, 2),
-                "reason": reason
-            }
-            closed_trades.append(closed_record)
-            del positions[sym]
-            
-            print(f"  🔴 CLOSED {sym} {side} ({reason}) | PnL: {pnl_pct:+.2f}%")
-            
-            msg = (f"🔴 <b>Virtual Trade Closed ({reason})</b>\n"
-                   f"نماد: {sym} | استراتژی: {pos['strategy']}\n"
-                   f"جهت: {side} | سود/ضرر: <b>{pnl_pct:+.2f}%</b>\n"
-                   f"موجودی جدید: ${wallet['balance']:,.2f}")
-            send_telegram(msg)
+    balance_usd = get_balance()
+    print(f"Alpaca Cash: ${balance_usd:,.2f}")
+    if balance_usd < 10:
+        print("FATAL: Balance too low.")
+        return 1
 
-    # ۲. اسکن برای پوزیشن‌های جدید
-    print(f"\n--- Scanning for New Signals ---")
-    print(f"Balance: ${wallet['balance']:,.2f} | Open Positions: {len(positions)}")
+    open_positions = get_positions()
+    print(f"Open Positions: {len(open_positions)}")
     
     new_trades = []
     newly_opened = set()
 
     for sym in SYMBOLS:
-        if sym in positions or sym in newly_opened:
+        clean_sym = sym.replace("/", "")
+        if clean_sym in open_positions or clean_sym in newly_opened:
             continue
-        if len(positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
+        if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
+            print("Max total positions reached.")
             break
 
+        print(f"Scanning {sym}...")
         symbol_signals = []
         
         if ENABLE_DONCHIAN:
@@ -374,36 +382,21 @@ def run_scan():
         symbol_signals.sort(key=lambda s: PRIORITY.get(s["strategy"], 0), reverse=True)
         sig = symbol_signals[0]
 
-        margin_to_use = wallet["balance"] * RISK_PER_TRADE_PCT
+        margin_to_use = balance_usd * RISK_PER_TRADE_PCT
         
-        positions[sym] = {
-            "strategy": sig["strategy"],
-            "side": sig["side"],
-            "entry": sig["entry"],
-            "sl": sig["sl"],
-            "tp": sig["tp"],
-            "margin": margin_to_use,
-            "unrealized_pnl_pct": 0.0
-        }
-        wallet["balance"] -= margin_to_use
+        print(f"  🟢 SIGNAL: {sig['strategy']} {sig['side']} {sym}")
+        resp = open_position(sym, sig["side"], margin_to_use)
         
-        new_trades.append((sym, sig, margin_to_use))
-        newly_opened.add(sym)
-        
-        print(f"  🟢 OPENED: {sig['strategy']} {sig['side']} {sym} @ {sig['entry']:.4f}")
-        
-        msg = (f"🟢 <b>Virtual Trade Opened</b>\n"
-               f"استراتژی: {sig['strategy']} | نماد: {sym}\n"
-               f"جهت: {sig['side']} | قیمت: {sig['entry']:.4f}\n"
-               f"مارجین: ${margin_to_use:.2f}")
-        send_telegram(msg)
+        if resp and resp.get("id"):
+            new_trades.append((sym, sig, margin_to_use))
+            newly_opened.add(clean_sym)
+            msg = (f"🟢 <b>Alpaca Paper Trade</b>\n"
+                   f"استراتژی: {sig['strategy']} | نماد: {sym}\n"
+                   f"جهت: {sig['side']} | قیمت: {sig['entry']:.4f}\n"
+                   f"مارجین: ${margin_to_use:.2f}")
+            send_telegram(msg)
 
-    wallet["positions"] = positions
-    wallet["closed_trades"] = closed_trades
-    save_wallet(wallet)
-    
-    print(f"\nResult: {len(new_trades)} new trades opened.")
-    print(f"Final Balance: ${wallet['balance']:,.2f} | Open Positions: {len(positions)}")
+    print(f"\nResult: {len(new_trades)} new trades opened on Alpaca Paper.")
     return 0
 
 if __name__ == "__main__":
