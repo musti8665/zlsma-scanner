@@ -1,8 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MarginPad Triple-Strategy Scanner — Donchian + DailyMACD + C_BE_trail
-======================================================================
+MarginPad Triple-Strategy Scanner — Donchian + DailyMACD + C_BE_trail (FIXED)
+============================================================================
+ENV:
+  MARGINPAD_API_KEY   (fallback hardcoded)
+  TELEGRAM_TOKEN      (fallback hardcoded)
+  TELEGRAM_CHAT_ID    (auto-detected from getUpdates)
+  VERBOSE=1           per-symbol diagnosis
+  DRY_RUN=1           detect only, don't open trades
+  INTERVAL_MIN=5      loop every N minutes (0 = single run)
+  MIN_MARGIN_USD=5    skip trades with smaller margin
+  KILL_COUNT_PAPER=0  1 = paper losses count toward kill-switch
+  RESET_KILL=1        clear kill-switch on startup
+  DAILY_PAPER_MODE=false  to trade DailyMACD live
 """
 
 import os, sys, json, csv, time, requests
@@ -14,7 +25,17 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 ENABLE_DONCHIAN = True
 ENABLE_DAILY    = True
-ENABLE_CBT      = True   # ✅ استراتژی سوم روی 30m و همان ۲۲ ارز
+ENABLE_CBT      = True
+
+# ============================================================
+# ENV / MODES
+# ============================================================
+VERBOSE          = os.environ.get("VERBOSE", "0") == "1"
+DRY_RUN          = os.environ.get("DRY_RUN", "0") == "1"
+INTERVAL_MIN     = int(os.environ.get("INTERVAL_MIN", "0"))
+MIN_MARGIN_USD   = float(os.environ.get("MIN_MARGIN_USD", "5.0"))
+KILL_COUNT_PAPER = os.environ.get("KILL_COUNT_PAPER", "0") == "1"
+RESET_KILL       = os.environ.get("RESET_KILL", "0") == "1"
 
 # ============================================================
 # پروفایل‌های دینامیک
@@ -43,21 +64,56 @@ VOL_FLOOR, VOL_CEIL = 0.15, 0.80
 DAILY_PAPER_MODE = os.environ.get("DAILY_PAPER_MODE", "true").lower() == "true"
 DAILY_EXIT_MODE  = os.environ.get("DAILY_EXIT_MODE", "macd").lower()
 DAILY_COOLDOWN_HOURS = 30
-CBT_COOLDOWN_HOURS   = 15    # 30 bars × 30min
+CBT_COOLDOWN_HOURS   = 15
 
-API_KEY = os.environ.get("MARGINPAD_API_KEY", "mpb_d04c938486b9f5e711f9a736084fa9b5").strip()
-TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo").strip()
+API_KEY = os.environ.get("MARGINPAD_API_KEY",
+                          "mpb_d04c938486b9f5e711f9a736084fa9b5").strip()
+TG_TOKEN = os.environ.get("TELEGRAM_TOKEN",
+                           "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo").strip()
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 if not API_KEY:
-    print("FATAL: MARGINPAD_API_KEY missing")
-    sys.exit(1)
+    print("FATAL: MARGINPAD_API_KEY missing"); sys.exit(1)
 
-BASE = "https://marginpad.io/api/bot/v1"
+BASE   = "https://marginpad.io/api/bot/v1"
 HEADERS = {"X-API-Key": API_KEY}
-H_JSON = {**HEADERS, "Content-Type": "application/json"}
+H_JSON  = {**HEADERS, "Content-Type": "application/json"}
 
-# ✅ همان ۲۲ ارز برای هر سه استراتژی
+# ============================================================
+# TELEGRAM auto-detect
+# ============================================================
+def _auto_detect_chat_id():
+    if not TG_TOKEN: return ""
+    try:
+        r = requests.get(f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates", timeout=10)
+        data = r.json()
+        if data.get("ok") and data.get("result"):
+            for upd in reversed(data["result"]):
+                msg = (upd.get("message") or upd.get("channel_post")
+                       or upd.get("edited_message"))
+                if msg and msg.get("chat", {}).get("id"):
+                    return str(msg["chat"]["id"])
+    except Exception as e:
+        print(f"  [tg-detect] error: {e}")
+    return ""
+
+if not TG_CHAT and TG_TOKEN:
+    print("⏳ TELEGRAM_CHAT_ID not set — trying auto-detect...")
+    TG_CHAT = _auto_detect_chat_id()
+    if TG_CHAT:
+        print(f"✅ Auto-detected chat ID: {TG_CHAT}")
+        print(f"   export TELEGRAM_CHAT_ID={TG_CHAT}")
+    else:
+        print("⚠️  Auto-detect failed. Fix:")
+        print(f"  1) Send /start to your bot")
+        print(f"  2) Open: https://api.telegram.org/bot{TG_TOKEN}/getUpdates")
+        print("  3) Copy \"chat\":{\"id\": <NUMBER>}")
+        print("  4) export TELEGRAM_CHAT_ID=<NUMBER>")
+        print("  ⚠️  Continuing WITHOUT Telegram notifications.\n")
+
+# ============================================================
+# 22 ارز
+# ============================================================
 SYMBOLS = [
     "ADA", "AVAX", "LINK", "LTC",
     "ENA", "ATOM", "NEAR", "ARB", "OP", "PEPE", "SHIB", "SUI",
@@ -65,13 +121,12 @@ SYMBOLS = [
 ]
 DONCHIAN_SYMBOLS = SYMBOLS
 DAILY_SYMBOLS    = SYMBOLS
-CBT_SYMBOLS      = SYMBOLS   # ✅ استراتژی سوم روی همان ارزها
+CBT_SYMBOLS      = SYMBOLS
 
 DONCHIAN_PARAMS = {
     "entry_n": 10, "exit_n": 5, "vol_mult": 2.0, "atr_mult": 2.5,
     "ema_period": 100, "min_bars": 200, "tp_rr": 5.0,
 }
-
 DAILY_MACD_PARAMS = {
     "pivot_period": 8, "qqe_rsi": 20, "qqe_sf": 9,
     "macd_fast": 5, "macd_slow": 13, "macd_signal": 10,
@@ -79,7 +134,7 @@ DAILY_MACD_PARAMS = {
     "vol_period": 30, "kijun_p": 20,
 }
 
-# ✅ پارامترهای قفل‌شده C_BE_trail (پورت مستقیم از بک‌تست)
+# --- C_BE_trail ---
 CBT_PVT       = 50
 CBT_TL        = 2
 CBT_SR_EX     = 3
@@ -97,6 +152,8 @@ CBT_TRAIL_R   = 1.5
 CBT_TRAIL_ATR = 1.2
 CBT_MAX_BARS  = 40
 CBT_MIN_BARS  = 500
+# ✅ FIX: واقعی‌ترین حداقل lookback برای همه اندیکاتورهای CBT
+CBT_MIN_LOOKBACK = max(CBT_KIJUN_LEN, CBT_ATR_BASE, CBT_PVT * 4 + 20) + 5  # = 255
 
 SCAN_TIMEFRAMES = [
     ("5m",  ["5", "5m"],          1, 365 * 24 * 12),
@@ -105,7 +162,6 @@ SCAN_TIMEFRAMES = [
     ("1h",  ["60", "1h"],         4, 365 * 24),
     ("4h",  ["240", "4h"],        5, 365 * 6),
 ]
-
 DAILY_MACD_TIMEFRAMES = [
     ("4h", ["240", "4h"],          5, 365 * 6),
     ("1d", ["1440", "1d"],         6, 365),
@@ -118,7 +174,7 @@ MAX_CBT_POSITIONS      = 3
 MAX_TOTAL_POSITIONS = MAX_DONCHIAN_POSITIONS + MAX_DAILY_POSITIONS + MAX_CBT_POSITIONS
 
 MAX_NOTIONAL_PCT = 0.75
-LOG_FILE = Path("marginpad_trades_log.json")
+LOG_FILE    = Path("marginpad_trades_log.json")
 LEDGER_FILE = Path("paper_ledger.csv")
 
 KILL_CONSEC_LOSSES, KILL_CONSEC_LOSS_SUM = 3, -15.0
@@ -129,23 +185,40 @@ FILTERS_DAILY    = {"min_sl": 0.5, "min_tp": 1.0, "min_rr": 1.5}
 FILTERS_CBT      = {"min_sl": 0.5, "min_tp": 1.0, "min_rr": 1.5}
 
 # ============================================================
-# کش
+# CACHE & VALIDATION
 # ============================================================
 _KLINES_CACHE = {}
 def clear_klines_cache(): _KLINES_CACHE.clear()
 
+def _normalize_klines(data):
+    """اعتبارسنجی و نرمال‌سازی پاسخ /klines"""
+    if data is None: return None
+    if isinstance(data, dict):
+        for k in ("klines", "data", "result", "candles", "items"):
+            if k in data:
+                data = data[k]; break
+        else:
+            raise ValueError(f"Unknown klines keys: {list(data.keys())[:5]}")
+    if not isinstance(data, list):
+        raise ValueError(f"Klines is {type(data).__name__}, expected list")
+    if data and not isinstance(data[0], dict):
+        raise ValueError(f"Kline item not dict: {type(data[0]).__name__}")
+    for req in ("time", "open", "high", "low", "close"):
+        if data and req not in data[0]:
+            raise ValueError(f"Kline missing field '{req}'. Keys: {list(data[0].keys())[:6]}")
+    return data
+
 def get_klines_cached(symbol, interval):
     key = (symbol, interval)
-    if key in _KLINES_CACHE:
-        return _KLINES_CACHE[key]
+    if key in _KLINES_CACHE: return _KLINES_CACHE[key]
     try:
         k = get_klines(symbol, interval)
         _KLINES_CACHE[key] = k
         return k
-    except Exception:
+    except Exception as e:
+        if VERBOSE: print(f"  [klines] {symbol} {interval}: {e}")
         _KLINES_CACHE[key] = None
         return None
-
 
 def fmt_price(p):
     if p >= 1000:   return f"{p:.2f}"
@@ -200,10 +273,14 @@ def has_position(open_positions, sym, side):
 def can_open_more(open_positions, pending_trades, max_total=MAX_TOTAL_POSITIONS):
     return len(open_positions) + len(pending_trades) < max_total
 
+# ============================================================
+# TELEGRAM
+# ============================================================
 def send_telegram(text):
     if not TG_TOKEN or not TG_CHAT: return False
-    try:
-        for chunk in [text[i:i+4000] for i in range(0, len(text), 4000)]:
+    ok = True
+    for chunk in [text[i:i+4000] for i in range(0, len(text), 4000)]:
+        try:
             r = requests.post(
                 f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
                 json={"chat_id": TG_CHAT, "text": chunk, "parse_mode": "HTML",
@@ -212,12 +289,13 @@ def send_telegram(text):
             )
             if r.status_code != 200:
                 print(f"  [telegram] HTTP {r.status_code}: {r.text[:200]}")
-                return False
-        return True
-    except Exception as e:
-        print(f"  [telegram] error: {e}")
-        return False
+                ok = False
+        except Exception as e:
+            print(f"  [telegram] error: {e}")
+            ok = False
+    return ok
 
+# (فرمت‌کننده‌ها بدون تغییر)
 def _sizes_block_risk(vol30, active_key):
     block = "\n📐 <b>سایز ۳ پروفایل:</b>\n"
     for k, p in PROFILES.items():
@@ -330,13 +408,16 @@ def format_strategy_summary(log_data, strategy, title):
 def check_kill_switch(log):
     closed = log.get("closed_trades", [])
     if not closed: return False, ""
-    dm = [t for t in closed if t.get("strategy") == "DailyMACD"]
+    # ✅ FIX: فقط live (یا همه اگر KILL_COUNT_PAPER=1)
+    dm = [t for t in closed
+          if t.get("strategy") == "DailyMACD"
+          and (KILL_COUNT_PAPER or not t.get("paper", False))]
     if len(dm) >= KILL_CONSEC_LOSSES:
         last_n = dm[-KILL_CONSEC_LOSSES:]
         if all(t["pnl_pct"] < 0 for t in last_n):
             total = sum(t["pnl_pct"] for t in last_n)
             if total < KILL_CONSEC_LOSS_SUM:
-                return True, f"🛑 KILL: {KILL_CONSEC_LOSSES} ضرر متوالی DailyMACD ({total:+.1f}%)"
+                return True, f"🛑 KILL: {KILL_CONSEC_LOSSES} ضرر متوالی DailyMACD live ({total:+.1f}%)"
     if len(dm) >= 10:
         pnls = [t["pnl_pct"] for t in dm]
         eq = np.cumsum(pnls); peak = np.maximum.accumulate(eq)
@@ -365,16 +446,18 @@ def log_ledger(date_str, strategy, opened, closed, balance):
     except Exception as e:
         print(f"  [ledger] write error: {e}")
 
+# ============================================================
+# API
+# ============================================================
 def get_klines(symbol, interval):
     r = requests.get(f"{BASE}/klines?symbol={symbol}&interval={interval}", timeout=15)
     r.raise_for_status()
-    return r.json()
+    return _normalize_klines(r.json())
 
 def get_klines_fallback(symbol, intervals):
     for interval in intervals:
         k = get_klines_cached(symbol, interval)
-        if k and len(k) >= 50:
-            return k
+        if k and len(k) >= 50: return k
     return None
 
 def get_positions():
@@ -393,8 +476,9 @@ def open_position(symbol, side, margin, leverage, sl, tp, coid):
     r = requests.post(f"{BASE}/open", headers=H_JSON, json=body, timeout=15)
     if r.status_code not in (200, 201):
         try: err = r.json()
-        except Exception: err = r.text[:800]
-        print(f"  [{symbol}] HTTP {r.status_code} — error: {err}")
+        except Exception: err = r.text[:500]
+        print(f"  [{symbol}] open HTTP {r.status_code}: {err}")
+        print(f"  [{symbol}] payload: {body}")
         return None
     return r.json()
 
@@ -406,13 +490,16 @@ def close_position(pos_dict):
     for key in ("id", "position_id", "order_id"):
         try:
             r = requests.post(f"{BASE}/close", headers=H_JSON,
-                             json={key: pos_id, "symbol": symbol}, timeout=15)
+                              json={key: pos_id, "symbol": symbol}, timeout=15)
             if r.status_code in (200, 201, 204):
                 return r.json() if r.text else {"ok": True}
         except Exception:
             continue
     return None
 
+# ============================================================
+# LOG
+# ============================================================
 def load_log():
     if LOG_FILE.exists():
         try: return json.loads(LOG_FILE.read_text())
@@ -423,9 +510,13 @@ def load_log():
 def save_log(log):
     LOG_FILE.write_text(json.dumps(log, indent=2, default=str))
 
+# ============================================================
+# INDICATORS
+# ============================================================
 def compute_atr(df, length=14):
     h, l, c = df["high"].values, df["low"].values, df["close"].values
-    tr = np.maximum(h - l, np.maximum(np.abs(h - np.roll(c, 1)), np.abs(l - np.roll(c, 1))))
+    tr = np.maximum(h - l, np.maximum(np.abs(h - np.roll(c, 1)),
+                                      np.abs(l - np.roll(c, 1))))
     tr[0] = h[0] - l[0]
     return pd.Series(tr).ewm(alpha=1/length, adjust=False).mean().values
 
@@ -448,10 +539,11 @@ def check_kijun_exit(df, side, kijun_p=20):
     return False
 
 # ============================================================
-# ✅ توابع C_BE_trail (پورت مستقیم از بک‌تست)
+# C_BE_trail
 # ============================================================
 def _atr_fn(h, l, c, p=14):
-    tr = np.maximum(h - l, np.maximum(np.abs(h - np.roll(c, 1)), np.abs(l - np.roll(c, 1))))
+    tr = np.maximum(h - l, np.maximum(np.abs(h - np.roll(c, 1)),
+                                      np.abs(l - np.roll(c, 1))))
     tr[0] = h[0] - l[0]
     return pd.Series(tr).ewm(alpha=1/p, adjust=False).mean().values
 
@@ -521,21 +613,19 @@ def build_tsr_short(high, low, pvt=50, tl=2, sr_except=3):
                     cond = (low[start:end] <= price_t) if is_low_side else (high[start:end] >= price_t)
                     if cond.any():
                         bb = start + int(np.argmax(cond))
-                        if is_low_side:
-                            sm[bb] = True
+                        if is_low_side: sm[bb] = True
 
     for _, p_px, p_conf in low_pivots:
         t0 = p_conf + sr_except + 1
         if t0 >= n: continue
         cond = low[t0:] < p_px
-        if cond.any():
-            sm[t0 + int(np.argmax(cond))] = True
+        if cond.any(): sm[t0 + int(np.argmax(cond))] = True
     return sm
 
 def detect_c_be_trail_signals(df):
     """
-    بررسی بارهای n-2 تا n-4 برای سیگنال SHORT.
-    شرط: TSR & ATR-Ratio ≥ 0.9 & close < Kijun(36) & QQE==-1
+    ✅ FIXED: حذف باگ `if i < CBT_MIN_BARS: continue` که باعث می‌شد
+    همیشه skip شود (i=498 < 500).
     """
     n = len(df)
     if n < CBT_MIN_BARS: return []
@@ -552,7 +642,8 @@ def detect_c_be_trail_signals(df):
 
     for offset in range(2, 5):
         i = n - offset
-        if i < CBT_MIN_BARS: continue
+        # ✅ فقط lookback واقعی اندیکاتورها را چک کن
+        if i < CBT_MIN_LOOKBACK: continue
         if pd.isna(ratio[i]) or pd.isna(kijun[i]): continue
         if not (tsr[i] and ratio[i] >= CBT_ATR_THR and c[i] < kijun[i] and q_tr[i] == -1):
             continue
@@ -578,7 +669,7 @@ def detect_c_be_trail_signals(df):
     return []
 
 # ============================================================
-# Detect Donchian + MACD (بدون تغییر)
+# Donchian + MACD
 # ============================================================
 def detect_donchian_signals(df, tf_label, bars_per_year=365 * 24):
     P = DONCHIAN_PARAMS
@@ -586,8 +677,8 @@ def detect_donchian_signals(df, tf_label, bars_per_year=365 * 24):
     if n < P["min_bars"] or "volume" not in df.columns: return []
 
     close, high, low, volume = df["close"], df["high"], df["low"], df["volume"]
-    tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()],
-                   axis=1).max(axis=1)
+    tr = pd.concat([high - low, (high - close.shift()).abs(),
+                    (low - close.shift()).abs()], axis=1).max(axis=1)
     atr = tr.ewm(alpha=1/14, adjust=False).mean()
     don_hi_entry = high.shift(1).rolling(P["entry_n"]).max()
     don_lo_entry = low.shift(1).rolling(P["entry_n"]).min()
@@ -744,35 +835,48 @@ def _get_price_safe(sym, interval="60", fallback=None):
     return fallback
 
 # ============================================================
-# 🔥 MAIN
+# MAIN
 # ============================================================
 def run_scan():
     clear_klines_cache()
     now = datetime.now(timezone.utc)
     today_str = now.strftime("%Y-%m-%d")
-    interval_min = int(os.environ.get("INTERVAL_MIN", "0"))
-    mode_str = f"Loop every {interval_min}min" if interval_min > 0 else "Single run"
 
-    print("=" * 70)
+    diag = {
+        "symbols_scanned": 0, "klines_failed": 0,
+        "signals": {}, "skipped_gate": 0, "skipped_price": 0,
+        "skipped_margin": 0, "trades": 0,
+    }
+
+    print("=" * 72)
     print(f"Triple-Strategy Scan — {now.strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"  Mode: {mode_str}")
-    print(f"  Donchian:  {'ON' if ENABLE_DONCHIAN else 'OFF'} "
-          f"({DONCHIAN_PROFILE['name']}, FUTURES {LEVERAGE}×, max {MAX_DONCHIAN_POSITIONS})")
+    print(f"  Mode: {'DRY_RUN' if DRY_RUN else 'LIVE'} | "
+          f"Loop: {INTERVAL_MIN}min | Verbose: {VERBOSE}")
+    print(f"  Telegram: {'✅ ' + TG_CHAT if TG_CHAT else '❌ not configured'}")
+    print(f"  Donchian: {'ON' if ENABLE_DONCHIAN else 'OFF'} "
+          f"({DONCHIAN_PROFILE['name']}, {LEVERAGE}×, max {MAX_DONCHIAN_POSITIONS})")
     print(f"  DailyMACD: {'ON' if ENABLE_DAILY else 'OFF'} "
-          f"({DAILY_PROFILE['name']}, {'PAPER' if DAILY_PAPER_MODE else 'LIVE'}, max {MAX_DAILY_POSITIONS})")
-    print(f"  C_BE_trail:{'ON' if ENABLE_CBT else 'OFF'} "
-          f"({CBT_PROFILE['name']}, 30m SHORT, FUTURES {LEVERAGE}×, max {MAX_CBT_POSITIONS})")
-    print(f"  Symbols:   {len(SYMBOLS)} (each strategy uses full list)")
-    print("=" * 70)
+          f"({DAILY_PROFILE['name']}, {'📝 PAPER' if DAILY_PAPER_MODE else '🟢 LIVE'}, "
+          f"max {MAX_DAILY_POSITIONS})")
+    print(f"  C_BE_trail: {'ON' if ENABLE_CBT else 'OFF'} "
+          f"({CBT_PROFILE['name']}, 30m SHORT, {LEVERAGE}×, max {MAX_CBT_POSITIONS})")
+    print(f"  Symbols: {len(SYMBOLS)}")
+    print("=" * 72)
 
     log = load_log()
+
+    if RESET_KILL and log.get("kill_switch"):
+        print(f"  🔄 RESET_KILL: clearing previous kill switch")
+        log["kill_switch"] = None
+        save_log(log)
 
     kill_on, kill_reason = check_kill_switch(log)
     if kill_on:
         print(f"\n{kill_reason}")
         if log.get("kill_switch") is None:
             log["kill_switch"] = kill_reason; save_log(log)
-            send_telegram(f"🛑 <b>KILL SWITCH ACTIVATED</b>\n{kill_reason}")
+            send_telegram(f"🛑 <b>KILL SWITCH</b>\n{kill_reason}\n\n"
+                          f"روشن‌کردن مجدد: RESET_KILL=1")
         kill_on = True
     else:
         if log.get("kill_switch"):
@@ -782,7 +886,8 @@ def run_scan():
     if health_warn: print(f"  {health_warn}")
 
     try:
-        bal = get_balance(); balance_usd = float(bal.get("balance_usd", 10000))
+        bal = get_balance()
+        balance_usd = float(bal.get("balance_usd", 10000))
         print(f"Balance: ${balance_usd:,.2f}")
     except Exception as e:
         print(f"FATAL balance: {e}"); return 1
@@ -799,9 +904,10 @@ def run_scan():
     new_trades = []
 
     def count_strategy_total(strategy):
-        return sum(1 for v in log["open_entries"].values() if v.get("strategy") == strategy)
+        return sum(1 for v in log["open_entries"].values()
+                   if v.get("strategy") == strategy)
 
-    # ============ PHASE 1a: Donchian EXITS ============
+    # ============ EXITS ============
     if ENABLE_DONCHIAN:
         for log_key in list(log["open_entries"].keys()):
             info = log["open_entries"].get(log_key)
@@ -834,7 +940,6 @@ def run_scan():
             except Exception as e:
                 print(f"  [DN {sym}] exit error: {e}")
 
-    # ============ PHASE 1b: DailyMACD EXITS ============
     if ENABLE_DAILY:
         for log_key in list(log["open_entries"].keys()):
             info = log["open_entries"].get(log_key)
@@ -870,7 +975,6 @@ def run_scan():
             except Exception as e:
                 print(f"  [DM {sym}] exit error: {e}")
 
-    # ============ PHASE 1c: CBT EXITS (BE + Trail + MaxBars) ============
     if ENABLE_CBT:
         for log_key in list(log["open_entries"].keys()):
             info = log["open_entries"].get(log_key)
@@ -912,7 +1016,8 @@ def run_scan():
                         trail_on = True
                         trail_sl = current_close + CBT_TRAIL_ATR * atr_now
                         current_sl = min(current_sl, trail_sl)
-                    if current_sl != info.get("current_sl", info["sl"]) or be_done != info.get("be_done", False):
+                    if (current_sl != info.get("current_sl", info["sl"])
+                            or be_done != info.get("be_done", False)):
                         info["current_sl"] = current_sl
                         info["be_done"] = be_done
                         info["trail_on"] = trail_on
@@ -931,7 +1036,7 @@ def run_scan():
             except Exception as e:
                 print(f"  [CBT {sym}] exit error: {e}")
 
-    # ============ PHASE 2: SL/TP auto-close & cleanup ============
+    # ============ SL/TP & CLEANUP ============
     for log_key in list(log["open_entries"].keys()):
         info = log["open_entries"].get(log_key)
         if not info: continue
@@ -944,14 +1049,14 @@ def run_scan():
         if ep <= 0: continue
 
         if not is_paper and sym not in open_positions:
-            print(f"  [{sym}] LIVE position not on exchange — cleaning log entry")
+            print(f"  [{sym}] LIVE position not on exchange — cleaning log")
             price = _get_price_safe(sym, "60", fallback=ep)
             pnl = ((price - ep) if side == "LONG" else (ep - price)) / ep * 100
             log["open_entries"].pop(log_key)
             rec = {"symbol": sym, "strategy": strategy, "side": side,
                    "entry": ep, "exit": price, "pnl_pct": round(pnl, 2),
-                   "tf": info.get("tf", "1h"), "close_reason": "SL/TP (exchange)",
-                   "paper": False}
+                   "tf": info.get("tf", "1h"),
+                   "close_reason": "SL/TP (exchange)", "paper": False}
             log["closed_trades"].append(rec); newly_closed.append(rec)
             print(f"  [CLOSED-AUTO] {strategy} {sym} {side} -> {pnl:+.2f}%")
             continue
@@ -984,13 +1089,13 @@ def run_scan():
             except Exception as e:
                 print(f"  [{strategy}-paper {sym}] SL/TP check error: {e}")
 
-    # ============ PHASE 3: NEW ENTRIES ============
+    # ============ NEW ENTRIES ============
     if kill_on:
-        print("\n  Entries skipped (kill switch active)")
+        print("\n  ⛔ Entries skipped (kill switch active). Use RESET_KILL=1")
     else:
         newly_opened_symbols = set()
 
-        # -------- 3a. Donchian --------
+        # -------- Donchian --------
         if ENABLE_DONCHIAN:
             for idx, sym in enumerate(DONCHIAN_SYMBOLS, 1):
                 if sym in open_positions or sym in newly_opened_symbols: continue
@@ -999,41 +1104,76 @@ def run_scan():
                 if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
                     print(f"  Max total ({MAX_TOTAL_POSITIONS}) reached"); break
 
-                print(f"  [scan DN {idx}/{len(DONCHIAN_SYMBOLS)}] {sym}...", flush=True)
+                diag["symbols_scanned"] += 1
+                if VERBOSE: print(f"  [DN {idx}/{len(DONCHIAN_SYMBOLS)}] {sym}...", flush=True)
                 current_price = _get_price_safe(sym, "60", fallback=None)
-                if current_price is None: continue
+                if current_price is None:
+                    diag["klines_failed"] += 1
+                    if VERBOSE: print(f"    ✗ no 1h price")
+                    continue
 
                 tf_data = fetch_timeframes(sym, DONCHIAN_PARAMS["min_bars"] + 50, bars=500)
                 all_entries = []
                 for tf_label, _, tf_prio, bpy_tf in SCAN_TIMEFRAMES:
                     df_tf = tf_data.get(tf_label)
-                    if df_tf is None: continue
+                    if df_tf is None:
+                        if VERBOSE: print(f"    ✗ {tf_label}: not enough bars")
+                        continue
                     try:
                         for s in detect_donchian_signals(df_tf, tf_label, bpy_tf):
                             if s["action"] in ("ENTRY_LONG", "ENTRY_SHORT"):
                                 s["_tf_prio"] = tf_prio; all_entries.append(s)
-                    except Exception: continue
+                    except Exception as e:
+                        if VERBOSE: print(f"    {tf_label} error: {e}")
 
-                if not all_entries: continue
-                if len(set(s["side"] for s in all_entries)) > 1: continue
+                if not all_entries:
+                    if VERBOSE: print(f"    — no Donchian signals")
+                    continue
+                if len(set(s["side"] for s in all_entries)) > 1:
+                    if VERBOSE: print(f"    ✗ conflicting sides")
+                    continue
                 all_entries.sort(key=lambda x: x["_tf_prio"], reverse=True)
                 sig = all_entries[0]
-                ok, _ = is_signal_ok(sig, FILTERS_DONCHIAN)
-                if not ok: continue
-                if sig["side"] == "LONG" and not (sig["sl"] < current_price < sig["tp"]): continue
-                if sig["side"] == "SHORT" and not (sig["tp"] < current_price < sig["sl"]): continue
+                diag["signals"]["Donchian"] = diag["signals"].get("Donchian", 0) + 1
+
+                ok, reason = is_signal_ok(sig, FILTERS_DONCHIAN)
+                if not ok:
+                    diag["skipped_gate"] += 1
+                    print(f"  [{sym}] DN SKIP gate: {reason}"); continue
+                if sig["side"] == "LONG" and not (sig["sl"] < current_price < sig["tp"]):
+                    diag["skipped_price"] += 1
+                    if VERBOSE: print(f"    ✗ price outside SL/TP")
+                    continue
+                if sig["side"] == "SHORT" and not (sig["tp"] < current_price < sig["sl"]):
+                    diag["skipped_price"] += 1
+                    continue
                 min_dist = current_price * 0.003
-                if abs(current_price - sig["sl"]) < min_dist or abs(current_price - sig["tp"]) < min_dist: continue
+                if (abs(current_price - sig["sl"]) < min_dist
+                        or abs(current_price - sig["tp"]) < min_dist):
+                    diag["skipped_price"] += 1
+                    continue
 
                 vol30 = sig.get("_vol30", 0.30)
                 if pd.isna(vol30): vol30 = 0.30
                 size_frac = compute_dynamic_size(vol30, DONCHIAN_PROFILE)
                 notional = min(balance_usd * size_frac, balance_usd * MAX_NOTIONAL_PCT)
                 margin = max(notional / LEVERAGE, 1.0)
+                if margin < MIN_MARGIN_USD:
+                    diag["skipped_margin"] += 1
+                    print(f"  [{sym}] DN SKIP margin ${margin:.2f} < ${MIN_MARGIN_USD}")
+                    continue
 
                 coid = f"Donchian-{sig['side']}-{sym}-{int(now.timestamp())}"
                 sl_r = round_price(sig["sl"], sig["entry"]); tp_r = round_price(sig["tp"], sig["entry"])
                 side_lc = "long" if sig["side"] == "LONG" else "short"
+
+                if DRY_RUN:
+                    print(f"  [DRY] Donchian {sig['side']} {sym} @ {fmt_price(sig['entry'])} | "
+                          f"margin ${margin:.2f}")
+                    new_trades.append(("Donchian", sym, sig, notional, margin))
+                    diag["trades"] += 1
+                    continue
+
                 try: resp = open_position(sym, side_lc, margin, LEVERAGE, sl_r, tp_r, coid)
                 except Exception as e:
                     print(f"  [DN {sym}] network error: {e}"); continue
@@ -1047,10 +1187,12 @@ def run_scan():
                     "profile": DONCHIAN_PROFILE_KEY, "paper": False,
                 }
                 new_trades.append(("Donchian", sym, sig, notional, margin))
+                diag["trades"] += 1
                 newly_opened_symbols.add(sym)
-                print(f"  🟢 [Donchian {sig['_tf_label']}] {sig['side']} {sym} @ {fmt_price(sig['entry'])} | {size_frac*100:.1f}% | {LEVERAGE}×")
+                print(f"  🟢 [Donchian {sig['_tf_label']}] {sig['side']} {sym} "
+                      f"@ {fmt_price(sig['entry'])} | {size_frac*100:.1f}% | {LEVERAGE}×")
 
-        # -------- 3b. DailyMACD --------
+        # -------- DailyMACD --------
         if ENABLE_DAILY:
             for idx, sym in enumerate(DAILY_SYMBOLS, 1):
                 if not DAILY_PAPER_MODE and (sym in open_positions or sym in newly_opened_symbols): continue
@@ -1060,17 +1202,20 @@ def run_scan():
                 if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
                     print(f"  Max total ({MAX_TOTAL_POSITIONS}) reached"); break
 
-                print(f"  [scan DM {idx}/{len(DAILY_SYMBOLS)}] {sym}...", flush=True)
+                if VERBOSE: print(f"  [DM {idx}/{len(DAILY_SYMBOLS)}] {sym}...", flush=True)
                 sigs_by_side = {"LONG": [], "SHORT": []}
                 for tf_label, iv, tf_prio, bpy in DAILY_MACD_TIMEFRAMES:
                     try:
                         df_tf, _bpy = fetch_daily_macd_tf(sym, tf_label)
-                        if df_tf is None: continue
+                        if df_tf is None:
+                            if VERBOSE: print(f"    ✗ {tf_label}: no data")
+                            continue
                         for s in detect_daily_macd_signals(df_tf, tf_label, bpy):
                             if s["action"].startswith("ENTRY_"):
                                 s["_tf_prio"] = tf_prio; s["_tf_label"] = tf_label; s["_bpy"] = bpy
                                 sigs_by_side[s["side"]].append(s)
-                    except Exception: continue
+                    except Exception as e:
+                        if VERBOSE: print(f"    {tf_label} error: {e}")
 
                 for side in ("LONG", "SHORT"):
                     side_sigs = sigs_by_side[side]
@@ -1082,11 +1227,16 @@ def run_scan():
                     if log_key in log["open_entries"]: continue
                     if not DAILY_PAPER_MODE and has_position(open_positions, sym, side): continue
                     if not DAILY_PAPER_MODE and not can_open_more(open_positions, new_trades): break
+
                     cd_key = f"DailyMACD:{sym}:{side}"
                     bar_ts = sig.get("_bar_ts")
-                    if bar_ts and hours_since_last_entry(log, cd_key, bar_ts) < DAILY_COOLDOWN_HOURS: continue
-                    ok, _ = is_signal_ok(sig, FILTERS_DAILY)
-                    if not ok: continue
+                    if bar_ts and hours_since_last_entry(log, cd_key, bar_ts) < DAILY_COOLDOWN_HOURS:
+                        if VERBOSE: print(f"    ✗ cooldown {DAILY_COOLDOWN_HOURS}h")
+                        continue
+                    ok, reason = is_signal_ok(sig, FILTERS_DAILY)
+                    if not ok:
+                        diag["skipped_gate"] += 1
+                        print(f"  [{sym}] DM SKIP gate: {reason}"); continue
 
                     try:
                         df_tf_check, _ = fetch_daily_macd_tf(sym, tf_label)
@@ -1101,6 +1251,12 @@ def run_scan():
                     size_frac = compute_dynamic_size(vol30, DAILY_PROFILE)
                     notional = min(balance_usd * size_frac, balance_usd * MAX_NOTIONAL_PCT)
                     margin = max(notional / LEVERAGE, 1.0)
+                    if margin < MIN_MARGIN_USD:
+                        diag["skipped_margin"] += 1
+                        print(f"  [{sym}] DM SKIP margin ${margin:.2f} < ${MIN_MARGIN_USD}")
+                        continue
+
+                    diag["signals"]["DailyMACD"] = diag["signals"].get("DailyMACD", 0) + 1
 
                     if DAILY_PAPER_MODE:
                         sig["_paper"] = True; sig["_tf_label"] = tf_label
@@ -1111,10 +1267,18 @@ def run_scan():
                         }
                         if bar_ts: record_entry_bar(log, cd_key, bar_ts)
                         new_trades.append(("DailyMACD", sym, sig, notional, margin))
-                        print(f"  📝 [PAPER {tf_label}] DailyMACD {side} {sym} @ {fmt_price(sig['entry'])} | {size_frac*100:.1f}%")
+                        diag["trades"] += 1
+                        print(f"  📝 [PAPER {tf_label}] DailyMACD {side} {sym} "
+                              f"@ {fmt_price(sig['entry'])} | {size_frac*100:.1f}%")
                     else:
+                        if DRY_RUN:
+                            print(f"  [DRY] DailyMACD {side} {sym} @ {fmt_price(sig['entry'])}")
+                            new_trades.append(("DailyMACD", sym, sig, notional, margin))
+                            diag["trades"] += 1
+                            continue
                         coid = f"DailyMACD-{tf_label}-{side}-{sym}-{int(now.timestamp())}"
-                        sl_r = round_price(sig["sl"], sig["entry"]); tp_r = round_price(sig["tp"], sig["entry"])
+                        sl_r = round_price(sig["sl"], sig["entry"])
+                        tp_r = round_price(sig["tp"], sig["entry"])
                         try: resp = open_position(sym, side.lower(), margin, LEVERAGE, sl_r, tp_r, coid)
                         except Exception as e:
                             print(f"  [DM {sym}] open error: {e}"); continue
@@ -1127,10 +1291,12 @@ def run_scan():
                         }
                         if bar_ts: record_entry_bar(log, cd_key, bar_ts)
                         new_trades.append(("DailyMACD", sym, sig, notional, margin))
+                        diag["trades"] += 1
                         newly_opened_symbols.add(sym)
-                        print(f"  🟢 [LIVE {tf_label}] DailyMACD {side} {sym} @ {fmt_price(sig['entry'])} | {size_frac*100:.1f}%")
+                        print(f"  🟢 [LIVE {tf_label}] DailyMACD {side} {sym} "
+                              f"@ {fmt_price(sig['entry'])} | {size_frac*100:.1f}%")
 
-        # -------- 3c. C_BE_trail (فقط 30m، همان ۲۲ ارز) --------
+        # -------- CBT --------
         if ENABLE_CBT:
             for idx, sym in enumerate(CBT_SYMBOLS, 1):
                 if sym in open_positions or sym in newly_opened_symbols: continue
@@ -1140,36 +1306,62 @@ def run_scan():
                 if len(open_positions) + len(new_trades) >= MAX_TOTAL_POSITIONS:
                     print(f"  Max total ({MAX_TOTAL_POSITIONS}) reached"); break
 
-                print(f"  [scan CBT {idx}/{len(CBT_SYMBOLS)}] {sym}...", flush=True)
+                if VERBOSE: print(f"  [CBT {idx}/{len(CBT_SYMBOLS)}] {sym}...", flush=True)
                 k30 = get_klines_fallback(sym, ["30", "30m"])
-                if not k30 or len(k30) < CBT_MIN_BARS: continue
+                if not k30 or len(k30) < CBT_MIN_BARS:
+                    if VERBOSE:
+                        n = len(k30) if k30 else 0
+                        print(f"    ✗ only {n}/{CBT_MIN_BARS} 30m bars")
+                    continue
                 df30 = klines_to_df(k30[-500:])
 
                 try: sigs = detect_c_be_trail_signals(df30)
                 except Exception as e:
                     print(f"  [CBT {sym}] detect error: {e}"); continue
-                if not sigs: continue
+                if not sigs:
+                    if VERBOSE: print(f"    — no CBT signal")
+                    continue
                 sig = sigs[0]
+                diag["signals"]["CBT"] = diag["signals"].get("CBT", 0) + 1
 
                 cd_key = f"CBT:{sym}"
                 bar_ts = sig.get("_bar_ts")
-                if bar_ts and hours_since_last_entry(log, cd_key, bar_ts) < CBT_COOLDOWN_HOURS: continue
+                if bar_ts and hours_since_last_entry(log, cd_key, bar_ts) < CBT_COOLDOWN_HOURS:
+                    if VERBOSE: print(f"    ✗ CBT cooldown {CBT_COOLDOWN_HOURS}h")
+                    continue
 
-                ok, _ = is_signal_ok(sig, FILTERS_CBT)
-                if not ok: continue
+                ok, reason = is_signal_ok(sig, FILTERS_CBT)
+                if not ok:
+                    diag["skipped_gate"] += 1
+                    print(f"  [{sym}] CBT SKIP gate: {reason}"); continue
 
                 cur_price = _get_price_safe(sym, "30", fallback=None)
                 if cur_price is None: continue
-                if not (sig["tp"] < cur_price < sig["sl"]): continue
+                if not (sig["tp"] < cur_price < sig["sl"]):
+                    diag["skipped_price"] += 1
+                    if VERBOSE: print(f"    ✗ price outside SL/TP")
+                    continue
 
                 vol30 = sig.get("_vol30", 0.30)
                 if pd.isna(vol30): vol30 = 0.30
                 size_frac = compute_dynamic_size(vol30, CBT_PROFILE)
                 notional = min(balance_usd * size_frac, balance_usd * MAX_NOTIONAL_PCT)
                 margin = max(notional / LEVERAGE, 1.0)
+                if margin < MIN_MARGIN_USD:
+                    diag["skipped_margin"] += 1
+                    print(f"  [{sym}] CBT SKIP margin ${margin:.2f} < ${MIN_MARGIN_USD}")
+                    continue
 
                 coid = f"CBT-SHORT-{sym}-{int(now.timestamp())}"
-                sl_r = round_price(sig["sl"], sig["entry"]); tp_r = round_price(sig["tp"], sig["entry"])
+                sl_r = round_price(sig["sl"], sig["entry"])
+                tp_r = round_price(sig["tp"], sig["entry"])
+
+                if DRY_RUN:
+                    print(f"  [DRY] CBT SHORT {sym} @ {fmt_price(sig['entry'])} | margin ${margin:.2f}")
+                    new_trades.append(("CBT", sym, sig, notional, margin))
+                    diag["trades"] += 1
+                    continue
+
                 try: resp = open_position(sym, "short", margin, LEVERAGE, sl_r, tp_r, coid)
                 except Exception as e:
                     print(f"  [CBT {sym}] network error: {e}"); continue
@@ -1180,14 +1372,16 @@ def run_scan():
                     "entry": sig["entry"], "sl": sig["sl"], "current_sl": sig["sl"],
                     "tp": sig["tp"], "margin": margin, "tf": "30m",
                     "entry_bar_ts": bar_ts, "_bar_ts": bar_ts,
-                    "atr": sig.get("_atr", risk_val := (sig["sl"] - sig["entry"]) / CBT_SL_MULT),
+                    "atr": sig.get("_atr", (sig["sl"] - sig["entry"]) / CBT_SL_MULT),
                     "risk": sig.get("_risk", sig["sl"] - sig["entry"]),
                     "be_done": False, "trail_on": False, "paper": False,
                 }
                 if bar_ts: record_entry_bar(log, cd_key, bar_ts)
                 new_trades.append(("CBT", sym, sig, notional, margin))
+                diag["trades"] += 1
                 newly_opened_symbols.add(sym)
-                print(f"  🔴 [CBT 30m] SHORT {sym} @ {fmt_price(sig['entry'])} | {size_frac*100:.1f}% | {LEVERAGE}×")
+                print(f"  🔴 [CBT 30m] SHORT {sym} @ {fmt_price(sig['entry'])} "
+                      f"| {size_frac*100:.1f}% | {LEVERAGE}×")
 
     save_log(log)
 
@@ -1206,7 +1400,6 @@ def run_scan():
         dn_new = [t for t in new_trades if t[0] == "Donchian"]
         dm_new = [t for t in new_trades if t[0] == "DailyMACD"]
         cb_new = [t for t in new_trades if t[0] == "CBT"]
-
         if dn_new:
             msg_blocks.append(f"<b>🔔 Donchian — {now.strftime('%H:%M')} UTC</b>\n"
                               f"<i>{DONCHIAN_PROFILE['name']} | {LEVERAGE}× FUTURES</i>")
@@ -1237,18 +1430,30 @@ def run_scan():
         msg_blocks.append(format_strategy_summary(log, "Donchian",  "📊 Donchian Stats"))
         msg_blocks.append(format_strategy_summary(log, "CBT",       "📊 C_BE_trail Stats"))
 
-    if msg_blocks:
-        if not send_telegram("\n\n".join(msg_blocks)):
-            print("  [warn] Telegram send failed")
+    if msg_blocks and TG_CHAT:
+        if send_telegram("\n\n".join(msg_blocks)):
+            print("  [telegram] sent ✓")
 
+    # ============ DIAGNOSTICS ============
+    print(f"\n📊 Scan summary:")
+    print(f"  Scanned: {diag['symbols_scanned']} | Klines fail: {diag['klines_failed']}")
+    if diag["signals"]: print(f"  Signals: {diag['signals']}")
+    print(f"  Skipped → gate:{diag['skipped_gate']} | "
+          f"price:{diag['skipped_price']} | margin:{diag['skipped_margin']}")
+    print(f"  Trades opened: {diag['trades']}" + (" (DRY_RUN)" if DRY_RUN else ""))
+    if not diag["signals"] and diag["symbols_scanned"] > 0:
+        print(f"\n  ⚠️  No signals found. Try:")
+        print(f"     • VERBOSE=1 DRY_RUN=1 python3 scanner.py")
+        print(f"     • Market quiet — wait for trend/volatility")
+        print(f"     • Check DAILY_PAPER_MODE (currently "
+              f"{'ON' if DAILY_PAPER_MODE else 'OFF'})")
     print(f"\nResult: {len(new_trades)} new | {len(newly_closed)} closed"
           f"{' | KILL SWITCH ACTIVE' if kill_on else ''}")
-    print("=" * 70)
+    print("=" * 72)
     return 0
 
 
 if __name__ == "__main__":
-    INTERVAL_MIN = int(os.environ.get("INTERVAL_MIN", "0"))
     if INTERVAL_MIN <= 0:
         sys.exit(run_scan())
     interval_sec = INTERVAL_MIN * 60
