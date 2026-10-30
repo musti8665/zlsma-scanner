@@ -3,7 +3,9 @@
 """
 Alpaca Paper Trading Scanner (Hybrid: Bybit Data + Alpaca Execution)
 ======================================================================
-استراتژی‌ها: Donchian + DailyMACD + CBT + SHIB RSI/Pivot (15m)
+✅ SHIB از Bybit Linear SHIB1000USDT ÷ ۱۰۰۰ (چون در Spot نیست)
+✅ Heartbeat هر ساعت در تلگرام
+✅ لاگ کامل هر مرحله برای دیباگ
 ⚠️ SHIB RSI/Pivot در بک‌تست اصلاح‌شده PF≈0.48 دارد — انتظار ضرر.
 """
 
@@ -11,7 +13,6 @@ import os, sys, json, time, requests
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
-from pathlib import Path
 from numpy.lib.stride_tricks import sliding_window_view
 
 # ============================================================
@@ -75,14 +76,14 @@ MAX_TOTAL_POSITIONS  = 5
 RISK_PER_TRADE_PCT   = 0.05
 
 # ============================================================
-# Telegram (با لاگ)
+# Telegram
 # ============================================================
 def send_telegram(text, silent_fail=False):
     if not TG_TOKEN:
-        if not silent_fail: print("  ⚠️ TG_TOKEN تنظیم نشده — پیام ارسال نمی‌شود")
+        if not silent_fail: print("  ⚠️ TG_TOKEN تنظیم نشده")
         return False
     if not TG_CHAT:
-        if not silent_fail: print("  ⚠️ TELEGRAM_CHAT_ID تنظیم نشده — پیام ارسال نمی‌شود")
+        if not silent_fail: print("  ⚠️ TELEGRAM_CHAT_ID تنظیم نشده")
         return False
     try:
         r = requests.post(
@@ -155,42 +156,90 @@ def close_position(symbol, position_data):
         print(f"  ⚠️ close exception: {e}"); return False
 
 # ============================================================
-# داده‌ی بازار (Bybit عمومی)
+# داده‌ی بازار — Multi-Source
 # ============================================================
 def get_current_price(sym):
-    url = f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={sym.replace('/','')}"
-    try:
-        r = requests.get(url, timeout=10)
-        d = r.json()
-        if d.get("retCode") == 0:
-            return float(d["result"]["list"][0]["lastPrice"])
-    except: pass
+    """قیمت لحظه‌ای از Bybit Linear (اول) یا Spot"""
+    clean = sym.replace("/", "").upper()
+    # SHIB از SHIB1000
+    if clean == "SHIBUSDT":
+        try:
+            r = requests.get(
+                "https://api.bybit.com/v5/market/tickers",
+                params={"category":"linear","symbol":"SHIB1000USDT"},
+                timeout=10,
+            )
+            d = r.json()
+            if d.get("retCode") == 0:
+                return float(d["result"]["list"][0]["lastPrice"]) / 1000.0
+        except: pass
+    # بقیه: Linear سپس Spot
+    for cat in ("linear","spot"):
+        try:
+            r = requests.get(
+                "https://api.bybit.com/v5/market/tickers",
+                params={"category":cat,"symbol":clean},
+                timeout=10,
+            )
+            d = r.json()
+            if d.get("retCode") == 0 and d["result"]["list"]:
+                return float(d["result"]["list"][0]["lastPrice"])
+        except: pass
     return None
 
 def get_klines(sym, interval):
-    tf_map = {"1h":"60","4h":"240","30m":"30","15m":"15"}
-    bybit_interval = tf_map.get(interval, "60")
-    url = (f"https://api.bybit.com/v5/market/kline?category=spot"
-           f"&symbol={sym.replace('/','')}&interval={bybit_interval}&limit=1000")
-    try:
-        r = requests.get(url, timeout=10)
-        d = r.json()
-        if d.get("retCode") != 0:
-            print(f"  ⚠️ kline {sym} {interval}: {d.get('retMsg')}")
-            return None
-        lst = d["result"]["list"]
-        if not lst:
-            print(f"  ⚠️ kline {sym} {interval}: empty")
-            return None
-        lst.reverse()
-        df = pd.DataFrame(lst, columns=["time","open","high","low","close","volume","turnover"])
-        df["time"] = pd.to_datetime(df["time"].astype(float), unit="ms", utc=True)
-        for col in ["open","high","low","close","volume"]:
-            df[col] = df[col].astype(float)
-        return df.set_index("time").sort_index()
-    except Exception as e:
-        print(f"  ⚠️ kline {sym} {interval}: {e}")
+    """
+    Multi-source. SHIB در Bybit SPOT نیست → از SHIB1000USDT (Linear) ÷ ۱۰۰۰.
+    بقیه نمادها: Bybit Linear → Bybit Spot.
+    """
+    clean = sym.replace("/", "").upper()
+    tf_map = {"15m":"15","30m":"30","1h":"60","4h":"240"}
+    tf = tf_map.get(interval, "15")
+
+    # ---- SHIB special: SHIB1000USDT ÷ 1000 ----
+    if clean == "SHIBUSDT":
+        try:
+            r = requests.get(
+                "https://api.bybit.com/v5/market/kline",
+                params={"category":"linear","symbol":"SHIB1000USDT",
+                        "interval":tf,"limit":1000},
+                timeout=10,
+            )
+            d = r.json()
+            if d.get("retCode") == 0 and d["result"]["list"]:
+                lst = d["result"]["list"]; lst.reverse()
+                df = pd.DataFrame(lst, columns=["time","open","high","low","close","volume","turnover"])
+                df["time"] = pd.to_datetime(df["time"].astype(float), unit="ms", utc=True)
+                for c in ["open","high","low","close"]:
+                    df[c] = df[c].astype(float) / 1000.0
+                df["volume"] = df["volume"].astype(float)
+                return df[["time","open","high","low","close","volume"]].set_index("time").sort_index()
+            print(f"  ⚠️ SHIB1000 {interval}: {d.get('retMsg')}")
+        except Exception as e:
+            print(f"  ⚠️ SHIB1000 {interval}: {e}")
         return None
+
+    # ---- Other symbols: try Linear first, then Spot ----
+    for category in ("linear", "spot"):
+        try:
+            r = requests.get(
+                "https://api.bybit.com/v5/market/kline",
+                params={"category":category,"symbol":clean,
+                        "interval":tf,"limit":1000},
+                timeout=10,
+            )
+            d = r.json()
+            if d.get("retCode") == 0 and d["result"]["list"]:
+                lst = d["result"]["list"]; lst.reverse()
+                df = pd.DataFrame(lst, columns=["time","open","high","low","close","volume","turnover"])
+                df["time"] = pd.to_datetime(df["time"].astype(float), unit="ms", utc=True)
+                for c in ["open","high","low","close","volume"]:
+                    df[c] = df[c].astype(float)
+                return df[["time","open","high","low","close","volume"]].set_index("time").sort_index()
+        except Exception as e:
+            print(f"  ⚠️ {category} {clean}: {e}")
+            continue
+    return None
 
 # ============================================================
 # اندیکاتورهای پایه
@@ -213,23 +262,25 @@ def _rsi_fn(c, p):
     return 100 - 100 / (1 + g / np.where(lo > 0, lo, np.nan))
 
 # ============================================================
-# SHIB RSI + Pivot (اصلاح Look-ahead، فقط LONG)
+# SHIB RSI + Pivot (بدون Look-ahead، فقط LONG)
 # ============================================================
 def _find_pivots_array(values, left, right):
     n = len(values); ph, pl = [], []
     for i in range(left, n - right):
         w = values[i-left:i+right+1]
         v = values[i]
-        if np.isnan(v): continue
-        if v == np.nanmax(w): ph.append(i)
-        elif v == np.nanmin(w): pl.append(i)
+        if np.isnan(v) or np.any(np.isnan(w)): continue
+        # مقایسه‌ی درست: خود v نباید در max/min شرکت کند
+        neighbors = np.concatenate([values[i-left:i], values[i+1:i+right+1]])
+        if np.any(np.isnan(neighbors)): continue
+        if v > neighbors.max(): ph.append(i)
+        elif v < neighbors.min(): pl.append(i)
     return ph, pl
 
 def detect_shib_rsi_signals(df, cfg):
     if df is None or len(df) < cfg["min_bars"]:
         return []
-    # آخرین کندل در حال شکل‌گیری → حذف
-    df = df.iloc[:-1]
+    df = df.iloc[:-1]  # حذف کندل در حال شکل‌گیری
     rsi = _rsi_fn(df["close"].values, cfg["rsi_period"])
     ph, pl = _find_pivots_array(rsi, cfg["pivot_sens"], cfg["pivot_sens"])
 
@@ -268,13 +319,13 @@ def check_shib_exit(position_data):
     sl = entry * (1 - SHIB_RSI_PARAMS["sl_pct"])
     tp = entry * (1 + SHIB_RSI_PARAMS["tp_pct"])
     if current <= sl:
-        return f"SL hit (entry={entry:.8f}, price={current:.8f})"
+        return f"SL hit (entry={entry:.8f}, now={current:.8f})"
     if current >= tp:
-        return f"TP hit (entry={entry:.8f}, price={current:.8f})"
+        return f"TP hit (entry={entry:.8f}, now={current:.8f})"
     return None
 
 # ============================================================
-# استراتژی‌های اصلی (بدون تغییر)
+# استراتژی‌های اصلی
 # ============================================================
 def _qqe_trend(c, rp=14, sm=5, factor=3.0):
     n = len(c)
@@ -437,7 +488,7 @@ def detect_daily_macd_signals(df, tf_label):
 # Heartbeat
 # ============================================================
 _last_heartbeat = 0.0
-HEARTBEAT_SECONDS = 3600  # هر ساعت
+HEARTBEAT_SECONDS = 3600
 
 def send_heartbeat(balance, n_positions, scan_counter, signals_found):
     global _last_heartbeat
@@ -448,8 +499,8 @@ def send_heartbeat(balance, n_positions, scan_counter, signals_found):
     msg = (f"💓 <b>Heartbeat</b>\n"
            f"Cash: ${balance:.2f}\n"
            f"Open positions: {n_positions}\n"
-           f"Scans since start: {scan_counter}\n"
-           f"Signals in last scan: {signals_found}")
+           f"Scans: {scan_counter}\n"
+           f"Signals last scan: {signals_found}")
     send_telegram(msg, silent_fail=True)
 
 # ============================================================
@@ -464,7 +515,7 @@ def run_scan():
     now = datetime.now(timezone.utc)
     print("\n" + "=" * 70)
     print(f"Scan #{_scan_counter} — {now.strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"Telegram: {'✅ configured' if TG_CHAT else '❌ CHAT_ID missing (no alerts!)'}")
+    print(f"Telegram: {'✅' if TG_CHAT else '❌ CHAT_ID missing (no alerts!)'}")
 
     balance_usd = get_balance()
     print(f"Alpaca Cash: ${balance_usd:,.2f}")
@@ -541,7 +592,7 @@ def run_scan():
 
         sides = set(s["side"] for s in symbol_signals)
         if len(sides) > 1:
-            print(f"  ⚠️ {sym} signals conflict ({sides}) — skipping")
+            print(f"  ⚠️ {sym} signals conflict ({sides}) — skip")
             continue
 
         PRIORITY = {"CBT": 4, "Donchian": 3, "DailyMACD": 2, "SHIB_RSI": 1}
@@ -564,8 +615,8 @@ def run_scan():
         if resp and resp.get("id"):
             new_trades.append((sym, sig, margin_to_use))
             newly_opened.add(clean_sym)
-            print(f"  ✅ Order placed: id={resp['id']}")
-            ok = send_telegram(
+            print(f"  ✅ Order: id={resp['id']}")
+            send_telegram(
                 f"🟢 <b>Opened {sig['side']}</b>\n"
                 f"Symbol: {sym}\n"
                 f"Strategy: {sig['strategy']} ({sig['_tf_label']})\n"
@@ -573,14 +624,10 @@ def run_scan():
                 f"SL: {sig['sl_pct']:.2f}% | TP: {sig['tp_pct']:.2f}%\n"
                 f"Margin: ${margin_to_use:.2f}"
             )
-            if not ok:
-                print("  ⚠️ trade placed but telegram failed — check TELEGRAM_CHAT_ID")
         else:
             print(f"  ❌ Order failed for {sym}")
 
-    print(f"Result: {len(new_trades)} new trades | {signals_count} signals seen")
-
-    # Heartbeat
+    print(f"Result: {len(new_trades)} new | {signals_count} signals seen")
     send_heartbeat(balance_usd, len(open_positions) + len(new_trades),
                    _scan_counter, signals_count)
     return 0
