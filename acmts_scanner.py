@@ -18,9 +18,6 @@ from datetime import datetime, timezone
 ALPACA_KEY = "PK4UHLFQBQQNWKGATLMUPYP7CH"
 ALPACA_SECRET = "4zYsHprZagiQYyVDX8q22yypaSPZHEmSs9uXB4SXf35U"
 
-TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo").strip()
-TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip() 
-
 ALPACA_BASE_URL = "https://paper-api.alpaca.markets/v2"
 ALPACA_HEADERS = {
     "APCA-API-KEY-ID": ALPACA_KEY,
@@ -28,6 +25,12 @@ ALPACA_HEADERS = {
     "accept": "application/json",
     "content-type": "application/json"
 }
+
+# ============================================================
+# TELEGRAM CONFIG (مستقیماً داخل کد)
+# ============================================================
+TG_TOKEN = "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo"
+TG_CHAT = "254500349"
 
 # ============================================================
 # 🏆 TOP 8 OPTIMIZED SHORT-TIMEFRAME STRATEGIES
@@ -52,7 +55,8 @@ def get_positions():
     try:
         r = requests.get(f"{ALPACA_BASE_URL}/positions", headers=ALPACA_HEADERS, timeout=10)
         return {p["symbol"].replace("/", ""): p for p in r.json()}
-    except:
+    except Exception as e:
+        print(f"Error getting positions: {e}")
         return {}
 
 def open_position(symbol, side, margin):
@@ -65,7 +69,8 @@ def open_position(symbol, side, margin):
         body = {"symbol": symbol, "qty": str(qty), "side": order_side, "type": "market", "time_in_force": "gtc"}
         r = requests.post(f"{ALPACA_BASE_URL}/orders", headers=ALPACA_HEADERS, json=body, timeout=10)
         return r.json() if r.status_code in (200, 201) else None
-    except:
+    except Exception as e:
+        print(f"Error opening position: {e}")
         return None
 
 def close_position(symbol, side, qty):
@@ -78,11 +83,21 @@ def close_position(symbol, side, qty):
         return False
 
 def send_telegram(text):
-    if not TG_TOKEN or not TG_CHAT: return False
+    if not TG_TOKEN or not TG_CHAT: 
+        print("  [!] Telegram Error: Token or Chat ID is missing.")
+        return False
     try:
-        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        r = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
             json={"chat_id": TG_CHAT, "text": text, "parse_mode": "HTML"}, timeout=15)
-    except: pass
+        if r.status_code == 200:
+            print("  [✓] Telegram message sent successfully.")
+            return True
+        else:
+            print(f"  [!] Telegram Error: HTTP {r.status_code} - {r.text}")
+            return False
+    except Exception as e:
+        print(f"  [!] Telegram Exception: {e}")
+        return False
 
 # ============================================================
 # Data Fetching (Bybit) - پشتیبانی از تایم‌فریم‌های جدید
@@ -222,13 +237,20 @@ def run_scan():
         if action == "CLOSE" and current_pos:
             print(f"  🔴 CLOSING {sym} {current_side} ({stype} Exit)")
             close_position(sym, current_side, current_pos['qty'])
-            send_telegram(f"🔴 <b>Closed</b>\n{sym} {current_side}\nStrategy: {stype}")
+            send_telegram(f"🔴 <b>Position Closed</b>\n{sym} {current_side}\nStrategy: {stype} ({tf})")
             
         elif action in ("LONG", "SHORT") and not current_pos:
             print(f"  🟢 OPENING {sym} {action} ({stype} {tf})")
             resp = open_position(sym, action, RISK_PER_TRADE_USD)
             if resp:
-                send_telegram(f"🟢 <b>Opened</b>\n{sym} {action}\nStrategy: {stype} ({tf})\nMargin: ${RISK_PER_TRADE_USD}")
+                msg = (f"🟢 <b>Position Opened</b>\n"
+                       f"Symbol: <b>{sym}</b>\n"
+                       f"Side: <b>{action}</b>\n"
+                       f"Strategy: {stype} ({tf})\n"
+                       f"Margin: ${RISK_PER_TRADE_USD}")
+                send_telegram(msg)
+            else:
+                print(f"  [!] Failed to open position on Alpaca for {sym}")
 
     print("Scan complete.")
     return 0
