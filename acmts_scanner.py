@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Alpaca Master Bot - Optimized with 5m/15m/30m Best Parameters
-=============================================================
+Alpaca Master Bot - Optimized with Heartbeat
+============================================
 """
 
 import os
@@ -33,7 +33,7 @@ TG_TOKEN = "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo"
 TG_CHAT = "254500349"
 
 # ============================================================
-# 🏆 TOP 8 OPTIMIZED SHORT-TIMEFRAME STRATEGIES
+# 🏆 TOP 8 OPTIMIZED STRATEGIES
 # ============================================================
 MASTER_STRATEGIES = [
     {"symbol": "AVAX/USD", "tf": "15m", "type": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
@@ -46,17 +46,16 @@ MASTER_STRATEGIES = [
     {"symbol": "LINK/USD", "tf": "30m", "type": "Supertrend", "params": {"period": 14, "mult": 4.0}},
 ]
 
-RISK_PER_TRADE_USD = 1000  # مارجین هر معامله در Alpaca
+RISK_PER_TRADE_USD = 1000
 
 # ============================================================
-# Alpaca Functions
+# Alpaca & Telegram Functions
 # ============================================================
 def get_positions():
     try:
         r = requests.get(f"{ALPACA_BASE_URL}/positions", headers=ALPACA_HEADERS, timeout=10)
         return {p["symbol"].replace("/", ""): p for p in r.json()}
-    except Exception as e:
-        print(f"Error getting positions: {e}")
+    except:
         return {}
 
 def open_position(symbol, side, margin):
@@ -65,12 +64,10 @@ def open_position(symbol, side, margin):
         if price is None: return None
         qty = float(f"{margin / price:.6f}")
         order_side = "buy" if side == "LONG" else "sell"
-        
         body = {"symbol": symbol, "qty": str(qty), "side": order_side, "type": "market", "time_in_force": "gtc"}
         r = requests.post(f"{ALPACA_BASE_URL}/orders", headers=ALPACA_HEADERS, json=body, timeout=10)
         return r.json() if r.status_code in (200, 201) else None
-    except Exception as e:
-        print(f"Error opening position: {e}")
+    except:
         return None
 
 def close_position(symbol, side, qty):
@@ -100,7 +97,7 @@ def send_telegram(text):
         return False
 
 # ============================================================
-# Data Fetching (Bybit) - پشتیبانی از تایم‌فریم‌های جدید
+# Data Fetching (Bybit)
 # ============================================================
 def get_bybit_symbol(sym):
     return f"{sym.split('/')[0]}USDT"
@@ -114,7 +111,6 @@ def get_current_price(sym):
     return None
 
 def get_klines(sym, interval):
-    # تبدیل فرمت‌های 5m, 15m, 30m به فرمت بای‌بیت
     tf_map = {"5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240"}
     bybit_interval = tf_map.get(interval, "15")
     url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={get_bybit_symbol(sym)}&interval={bybit_interval}&limit=500"
@@ -131,7 +127,7 @@ def get_klines(sym, interval):
         return None
 
 # ============================================================
-# Indicators & Signals
+# Indicators
 # ============================================================
 def calc_supertrend(df, period=10, mult=3.0):
     h, l, c = df['high'], df['low'], df['close']
@@ -179,31 +175,26 @@ def calc_qqe(df, rsi_p, smooth, factor):
 
 def check_signal(df, strat_type, params, current_side):
     close = df['close']
-    
     if strat_type == "MACD":
         macd = close.ewm(span=params["fast"]).mean() - close.ewm(span=params["slow"]).mean()
         sig = macd.ewm(span=params["signal"]).mean()
         hist = macd - sig
-        
         if hist.iloc[-1] > 0 and hist.iloc[-2] <= 0: return "LONG"
         if hist.iloc[-1] < 0 and hist.iloc[-2] >= 0: return "SHORT"
         if current_side == "LONG" and hist.iloc[-1] < 0: return "CLOSE"
         if current_side == "SHORT" and hist.iloc[-1] > 0: return "CLOSE"
-
     elif strat_type == "QQE":
         q = calc_qqe(df, params["rsi_period"], params["smooth"], params["factor"])
         if q.iloc[-1] == 1 and q.iloc[-2] == -1: return "LONG"
         if q.iloc[-1] == -1 and q.iloc[-2] == 1: return "SHORT"
         if current_side == "LONG" and q.iloc[-1] == -1: return "CLOSE"
         if current_side == "SHORT" and q.iloc[-1] == 1: return "CLOSE"
-
     elif strat_type == "Supertrend":
         st = calc_supertrend(df, params["period"], params["mult"])
         if st.iloc[-1] == 1 and st.iloc[-2] == -1: return "LONG"
         if st.iloc[-1] == -1 and st.iloc[-2] == 1: return "SHORT"
         if current_side == "LONG" and st.iloc[-1] == -1: return "CLOSE"
         if current_side == "SHORT" and st.iloc[-1] == 1: return "CLOSE"
-        
     return None
 
 # ============================================================
@@ -212,11 +203,16 @@ def check_signal(df, strat_type, params, current_side):
 def run_scan():
     now = datetime.now(timezone.utc)
     print("=" * 70)
-    print(f"Alpaca 5m/15m/30m Optimized Bot — {now.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"Alpaca Bot — {now.strftime('%Y-%m-%d %H:%M UTC')}")
     
     open_positions = get_positions()
     print(f"Open Positions: {len(open_positions)}")
     
+    # 👇 1. ارسال پیام ضربان قلب (Heartbeat) در شروع هر اجرا 👇
+    heartbeat_msg = f"🤖 <b>ربات اجرا شد</b>\nزمان: {now.strftime('%H:%M')} UTC\nپوزیشن‌های باز: {len(open_positions)}\n"
+    
+    new_action_taken = False
+
     for strat in MASTER_STRATEGIES:
         sym = strat["symbol"]
         tf = strat["tf"]
@@ -225,7 +221,8 @@ def run_scan():
         
         clean_sym = sym.replace("/", "")
         df = get_klines(sym, tf)
-        if df is None or len(df) < 50: continue
+        if df is None or len(df) < 50: 
+            continue
         
         current_pos = open_positions.get(clean_sym)
         current_side = ""
@@ -238,6 +235,7 @@ def run_scan():
             print(f"  🔴 CLOSING {sym} {current_side} ({stype} Exit)")
             close_position(sym, current_side, current_pos['qty'])
             send_telegram(f"🔴 <b>Position Closed</b>\n{sym} {current_side}\nStrategy: {stype} ({tf})")
+            new_action_taken = True
             
         elif action in ("LONG", "SHORT") and not current_pos:
             print(f"  🟢 OPENING {sym} {action} ({stype} {tf})")
@@ -249,8 +247,12 @@ def run_scan():
                        f"Strategy: {stype} ({tf})\n"
                        f"Margin: ${RISK_PER_TRADE_USD}")
                 send_telegram(msg)
-            else:
-                print(f"  [!] Failed to open position on Alpaca for {sym}")
+                new_action_taken = True
+
+    # 👇 2. اگر هیچ معامله‌ای انجام نشد، پیام وضعیت بفرست 👇
+    if not new_action_taken:
+        print("  No new signals. Sending heartbeat.")
+        send_telegram(heartbeat_msg)
 
     print("Scan complete.")
     return 0
