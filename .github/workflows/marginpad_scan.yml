@@ -1,9 +1,10 @@
-name: Alpaca Paper Trading
+name: Alpaca Trading Bot (30m)
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
-  workflow_dispatch:
+    # اجرای خودکار هر ۳۰ دقیقه یک بار
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # اجازه اجرای دستی برای تست
 
 permissions:
   contents: write
@@ -27,6 +28,12 @@ jobs:
 
       - name: Run scanner
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TG_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT }}
+          PYTHONUNBUFFERED: 1
         run: python acmts_scanner.py
+
+      - name: Commit and save logs
+        if: always()
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: auto-update bot logs [skip ci]"
+          file_pattern: "*.json *.csv"
