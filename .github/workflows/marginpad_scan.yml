@@ -1,10 +1,9 @@
-name: Alpaca Trading Bot (30m)
+name: Binance Demo Futures Scanner (30m)
 
 on:
   schedule:
-    # اجرای خودکار هر ۳۰ دقیقه یک بار
     - cron: '*/30 * * * *'
-  workflow_dispatch: # اجازه اجرای دستی برای تست
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,11 +23,24 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        run: pip install requests pandas numpy
+        run: |
+          pip install --upgrade pip
+          pip install requests pandas numpy python-binance
+
+      - name: Verify best_configs.json
+        run: |
+          if [ ! -f best_configs.json ]; then
+            echo "❌ best_configs.json not found in repo!"
+            exit 1
+          fi
+          echo "✅ best_configs.json found"
+          cat best_configs.json | head -5
 
       - name: Run scanner
         env:
           PYTHONUNBUFFERED: 1
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
         run: python acmts_scanner.py
 
       - name: Commit and save logs
@@ -36,4 +48,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: auto-update bot logs [skip ci]"
-          file_pattern: "*.json *.csv"
+          file_pattern: "*.json *.csv *.log"
