@@ -1,261 +1,394 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Alpaca Master Bot - Optimized with Heartbeat
-============================================
+Live Binance Futures Testnet Trader
+====================================
+- Reads best_configs.json
+- Filters to only USDT-quoted symbols (Binance USD-M Futures)
+- Polls closed candles, generates signals, places market orders
+- Supports real Long/Short with exchange-side SL/TP
+- Uses Binance Futures Testnet (testnet.binancefuture.com)
 """
 
 import os
-import sys
-import requests
-import numpy as np
-import pandas as pd
+import json
+import time
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_DOWN
+
+import pandas as pd
+import numpy as np
+from binance.client import Client
+from binance.exceptions import BinanceAPIException
 
 # ============================================================
-# ALPACA CONFIG
+# CONFIG
 # ============================================================
-ALPACA_KEY = "PK4UHLFQBQQNWKGATLMUPYP7CH"
-ALPACA_SECRET = "4zYsHprZagiQYyVDX8q22yypaSPZHEmSs9uXB4SXf35U"
+API_KEY = os.environ.get("BINANCE_API_KEY", "qGEVAOupRbdzcUf3LCOFmpHVoBvncqO4R8lJQSHYNrEe8MthJ4OoFTRClJ3le5Ng")
+API_SECRET = os.environ.get("BINANCE_API_SECRET", "iRXxFB4hrhjVCVlM4fOnAEAz0tam1xR1zcWm8Db0vta46y8c3Pn6vDzP5RkS1Ixs")
 
-ALPACA_BASE_URL = "https://paper-api.alpaca.markets/v2"
-ALPACA_HEADERS = {
-    "APCA-API-KEY-ID": ALPACA_KEY,
-    "APCA-API-SECRET-KEY": ALPACA_SECRET,
-    "accept": "application/json",
-    "content-type": "application/json"
-}
+CONFIG_FILE = "best_configs.json"
 
-# ============================================================
-# TELEGRAM CONFIG (مستقیماً داخل کد)
-# ============================================================
-TG_TOKEN = "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo"
-TG_CHAT = "254500349"
+RISK_PCT = 0.02
+LEVERAGE = 3
+SL_ATR_MULT = 2.5
+TP_ATR_MULT = 2.5
 
-# ============================================================
-# 🏆 TOP 8 OPTIMIZED STRATEGIES
-# ============================================================
-MASTER_STRATEGIES = [
-    {"symbol": "AVAX/USD", "tf": "15m", "type": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "SKY/USD",  "tf": "30m", "type": "QQE",        "params": {"rsi_period": 14, "smooth": 3, "factor": 2.5}},
-    {"symbol": "SKY/USD",  "tf": "30m", "type": "Supertrend", "params": {"period": 14, "mult": 2.0}},
-    {"symbol": "POL/USD",  "tf": "5m",  "type": "QQE",        "params": {"rsi_period": 14, "smooth": 7, "factor": 4.236}},
-    {"symbol": "CRV/USD",  "tf": "30m", "type": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 7}},
-    {"symbol": "WIF/USD",  "tf": "15m", "type": "QQE",        "params": {"rsi_period": 10, "smooth": 3, "factor": 3.0}},
-    {"symbol": "FIL/USD",  "tf": "15m", "type": "QQE",        "params": {"rsi_period": 10, "smooth": 3, "factor": 2.5}},
-    {"symbol": "LINK/USD", "tf": "30m", "type": "Supertrend", "params": {"period": 14, "mult": 4.0}},
-]
+TF_TO_INTERVAL = {"5m": "5m", "15m": "15m", "30m": "30m"}
+TF_TO_SECONDS = {"5m": 300, "15m": 900, "30m": 1800}
 
-RISK_PER_TRADE_USD = 1000
+# فقط نمادهایی که در بایننس فیوچرز موجودند
+SUPPORTED_QUOTE = "USDT"
 
 # ============================================================
-# Alpaca & Telegram Functions
+# BINANCE CLIENT (TESTNET)
 # ============================================================
-def get_positions():
-    try:
-        r = requests.get(f"{ALPACA_BASE_URL}/positions", headers=ALPACA_HEADERS, timeout=10)
-        return {p["symbol"].replace("/", ""): p for p in r.json()}
-    except:
-        return {}
+client = Client(API_KEY, API_SECRET, testnet=True)
 
-def open_position(symbol, side, margin):
-    try:
-        price = get_current_price(symbol)
-        if price is None: return None
-        qty = float(f"{margin / price:.6f}")
-        order_side = "buy" if side == "LONG" else "sell"
-        body = {"symbol": symbol, "qty": str(qty), "side": order_side, "type": "market", "time_in_force": "gtc"}
-        r = requests.post(f"{ALPACA_BASE_URL}/orders", headers=ALPACA_HEADERS, json=body, timeout=10)
-        return r.json() if r.status_code in (200, 201) else None
-    except:
-        return None
-
-def close_position(symbol, side, qty):
-    try:
-        order_side = "sell" if side == "LONG" else "buy"
-        body = {"symbol": symbol, "qty": str(qty), "side": order_side, "type": "market", "time_in_force": "gtc"}
-        requests.post(f"{ALPACA_BASE_URL}/orders", headers=ALPACA_HEADERS, json=body, timeout=10)
-        return True
-    except:
-        return False
-
-def send_telegram(text):
-    if not TG_TOKEN or not TG_CHAT: 
-        print("  [!] Telegram Error: Token or Chat ID is missing.")
-        return False
-    try:
-        r = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={"chat_id": TG_CHAT, "text": text, "parse_mode": "HTML"}, timeout=15)
-        if r.status_code == 200:
-            print("  [✓] Telegram message sent successfully.")
-            return True
-        else:
-            print(f"  [!] Telegram Error: HTTP {r.status_code} - {r.text}")
-            return False
-    except Exception as e:
-        print(f"  [!] Telegram Exception: {e}")
-        return False
+def to_binance_symbol(symbol: str) -> str:
+    return symbol.replace("/", "")
 
 # ============================================================
-# Data Fetching (Bybit)
+# DATA FETCH
 # ============================================================
-def get_bybit_symbol(sym):
-    return f"{sym.split('/')[0]}USDT"
-
-def get_current_price(sym):
-    url = f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={get_bybit_symbol(sym)}"
-    try:
-        r = requests.get(url, timeout=10).json()
-        if r.get('retCode') == 0: return float(r['result']['list'][0]['lastPrice'])
-    except: pass
-    return None
-
-def get_klines(sym, interval):
-    tf_map = {"5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240"}
-    bybit_interval = tf_map.get(interval, "15")
-    url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={get_bybit_symbol(sym)}&interval={bybit_interval}&limit=500"
-    try:
-        r = requests.get(url, timeout=10).json()
-        if r.get('retCode') != 0: return None
-        lst = r['result']['list']
-        lst.reverse()
-        df = pd.DataFrame(lst, columns=['time', 'open', 'high', 'low', 'close', 'volume', 'turnover'])
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            df[col] = df[col].astype(float)
-        return df
-    except:
-        return None
+def fetch_klines(symbol: str, interval: str, limit: int = 200) -> pd.DataFrame:
+    """کندل‌های بسته‌شده را برمی‌گرداند (کندل آخر حذف می‌شود)."""
+    raw = client.futures_klines(
+        symbol=to_binance_symbol(symbol),
+        interval=interval,
+        limit=limit,
+    )
+    df = pd.DataFrame(raw, columns=[
+        "t", "open", "high", "low", "close", "volume",
+        "close_time", "quote_vol", "trades", "tb_base", "tb_quote", "ignore"
+    ])
+    df["t"] = pd.to_datetime(df["t"], unit="ms", utc=True)
+    df = df.set_index("t").sort_index()
+    for c in ["open", "high", "low", "close", "volume"]:
+        df[c] = df[c].astype(float)
+    # حذف کندل آخر که هنوز بسته نشده
+    return df.iloc[:-1]
 
 # ============================================================
-# Indicators
+# INDICATORS (همان منطق)
 # ============================================================
-def calc_supertrend(df, period=10, mult=3.0):
-    h, l, c = df['high'], df['low'], df['close']
-    tr = pd.concat([h-l, (h-c.shift()).abs(), (l-c.shift()).abs()], axis=1).max(axis=1)
-    a = tr.ewm(alpha=1/period, adjust=False).mean().values
+def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    h, l, c = df["high"], df["low"], df["close"]
+    tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+    return tr.ewm(alpha=1 / period, adjust=False).mean()
+
+def rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    delta = series.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
+    return 100 - 100 / (1 + gain / loss.replace(0, np.nan))
+
+def supertrend(df: pd.DataFrame, period: int = 10, mult: float = 3.0) -> pd.Series:
+    h, l, c = df["high"].values, df["low"].values, df["close"].values
+    a = atr(df, period).values
     hl2 = (h + l) / 2
-    up_u, up_l = hl2 + mult*a, hl2 - mult*a
+    up_u, up_l = hl2 + mult * a, hl2 - mult * a
     n = len(c)
-    fu, fl, trend = np.full(n, np.nan), np.full(n, np.nan), np.ones(n, dtype=int)
+    fu, fl = np.full(n, np.nan), np.full(n, np.nan)
+    trend = np.ones(n, dtype=int)
     for i in range(int(period), n):
-        if np.isnan(up_u.iloc[i]): continue
-        if np.isnan(fu[i-1]):
-            fu[i], fl[i] = up_u.iloc[i], up_l.iloc[i]
-            trend[i] = 1 if c.iloc[i] > fl[i] else -1
+        if np.isnan(up_u[i]):
             continue
-        fu[i] = up_u.iloc[i] if (up_u.iloc[i] < fu[i-1] or c.iloc[i-1] > fu[i-1]) else fu[i-1]
-        fl[i] = up_l.iloc[i] if (up_l.iloc[i] > fl[i-1] or c.iloc[i-1] < fl[i-1]) else fl[i-1]
-        trend[i] = (-1 if c.iloc[i] < fl[i] else 1) if trend[i-1] == 1 else (1 if c.iloc[i] > fu[i] else -1)
+        if np.isnan(fu[i - 1]):
+            fu[i], fl[i] = up_u[i], up_l[i]
+            trend[i] = 1 if c[i] > fl[i] else -1
+            continue
+        fu[i] = up_u[i] if (up_u[i] < fu[i - 1] or c[i - 1] > fu[i - 1]) else fu[i - 1]
+        fl[i] = up_l[i] if (up_l[i] > fl[i - 1] or c[i - 1] < fl[i - 1]) else fl[i - 1]
+        trend[i] = (-1 if c[i] < fl[i] else 1) if trend[i - 1] == 1 else (1 if c[i] > fu[i] else -1)
     return pd.Series(trend, index=df.index)
 
-def calc_qqe(df, rsi_p, smooth, factor):
-    c = df['close']
-    delta = c.diff()
-    up = delta.clip(lower=0).ewm(alpha=1/rsi_p, adjust=False).mean()
-    dn = (-delta.clip(upper=0)).ewm(alpha=1/rsi_p, adjust=False).mean()
-    rs = 100 - 100/(1 + up/dn.replace(0, np.nan))
-    rma = rs.ewm(span=smooth, adjust=False).mean()
+def qqe(df: pd.DataFrame, rsi_p: int = 14, smooth: int = 5, factor: float = 4.236) -> pd.Series:
+    c = df["close"]
+    r = rsi(c, rsi_p)
+    rma = r.ewm(span=smooth, adjust=False).mean()
     rdiff = rma.diff().abs()
-    wilder = 2*rsi_p - 1
-    atr_r = rdiff.ewm(alpha=1/wilder, adjust=False).mean()
+    atr_r = rdiff.ewm(alpha=1 / (2 * rsi_p - 1), adjust=False).mean()
     dar = atr_r * factor
     n = len(c)
-    trend = np.zeros(n, dtype=int); trend[0] = 1
+    trend = np.zeros(n, dtype=int)
+    trend[0] = 1
     lb, sb = np.full(n, np.nan), np.full(n, np.nan)
     lb[0], sb[0] = rma.iloc[0] - dar.iloc[0], rma.iloc[0] + dar.iloc[0]
     rn, dn_arr = rma.values, dar.values
     for i in range(1, n):
         nl, ns = rn[i] - dn_arr[i], rn[i] + dn_arr[i]
-        lb[i] = max(lb[i-1], nl) if (rn[i-1] > lb[i-1] and rn[i] > lb[i-1]) else nl
-        sb[i] = min(sb[i-1], ns) if (rn[i-1] < sb[i-1] and rn[i] < sb[i-1]) else ns
-        if rn[i] > sb[i-1]: trend[i] = 1
-        elif rn[i] < lb[i-1]: trend[i] = -1
-        else: trend[i] = trend[i-1]
+        lb[i] = max(lb[i - 1], nl) if (rn[i - 1] > lb[i - 1] and rn[i] > lb[i - 1]) else nl
+        sb[i] = min(sb[i - 1], ns) if (rn[i - 1] < sb[i - 1] and rn[i] < sb[i - 1]) else ns
+        if rn[i] > sb[i - 1]:
+            trend[i] = 1
+        elif rn[i] < lb[i - 1]:
+            trend[i] = -1
+        else:
+            trend[i] = trend[i - 1]
     return pd.Series(trend, index=df.index)
 
-def check_signal(df, strat_type, params, current_side):
-    close = df['close']
-    if strat_type == "MACD":
-        macd = close.ewm(span=params["fast"]).mean() - close.ewm(span=params["slow"]).mean()
-        sig = macd.ewm(span=params["signal"]).mean()
+def generate_signal(df: pd.DataFrame, strategy: str, params: dict) -> dict:
+    if strategy == "MACD":
+        close = df["close"]
+        fast = close.ewm(span=params["fast"], adjust=False).mean()
+        slow = close.ewm(span=params["slow"], adjust=False).mean()
+        macd = fast - slow
+        sig = macd.ewm(span=params["signal"], adjust=False).mean()
         hist = macd - sig
-        if hist.iloc[-1] > 0 and hist.iloc[-2] <= 0: return "LONG"
-        if hist.iloc[-1] < 0 and hist.iloc[-2] >= 0: return "SHORT"
-        if current_side == "LONG" and hist.iloc[-1] < 0: return "CLOSE"
-        if current_side == "SHORT" and hist.iloc[-1] > 0: return "CLOSE"
-    elif strat_type == "QQE":
-        q = calc_qqe(df, params["rsi_period"], params["smooth"], params["factor"])
-        if q.iloc[-1] == 1 and q.iloc[-2] == -1: return "LONG"
-        if q.iloc[-1] == -1 and q.iloc[-2] == 1: return "SHORT"
-        if current_side == "LONG" and q.iloc[-1] == -1: return "CLOSE"
-        if current_side == "SHORT" and q.iloc[-1] == 1: return "CLOSE"
-    elif strat_type == "Supertrend":
-        st = calc_supertrend(df, params["period"], params["mult"])
-        if st.iloc[-1] == 1 and st.iloc[-2] == -1: return "LONG"
-        if st.iloc[-1] == -1 and st.iloc[-2] == 1: return "SHORT"
-        if current_side == "LONG" and st.iloc[-1] == -1: return "CLOSE"
-        if current_side == "SHORT" and st.iloc[-1] == 1: return "CLOSE"
+        st = supertrend(df, 10, 3.0)
+        entry_long = (hist.iloc[-1] > 0) and (hist.iloc[-2] <= 0)
+        entry_short = (hist.iloc[-1] < 0) and (hist.iloc[-2] >= 0)
+        exit_long = (hist.iloc[-1] < 0) or (st.iloc[-1] == -1)
+        exit_short = (hist.iloc[-1] > 0) or (st.iloc[-1] == 1)
+    elif strategy == "QQE":
+        q = qqe(df, params["rsi_period"], params["smooth"], params["factor"])
+        entry_long = (q.iloc[-1] == 1) and (q.iloc[-2] == -1)
+        entry_short = (q.iloc[-1] == -1) and (q.iloc[-2] == 1)
+        exit_long = q.iloc[-1] == -1
+        exit_short = q.iloc[-1] == 1
+    elif strategy == "Volume":
+        vma = df["volume"].rolling(params["ma_period"]).mean()
+        vol_ok = df["volume"] > params["vol_mult"] * vma
+        close = df["close"]
+        entry_long = bool(vol_ok.iloc[-1] and close.iloc[-1] > close.iloc[-2])
+        entry_short = bool(vol_ok.iloc[-1] and close.iloc[-1] < close.iloc[-2])
+        exit_long = close.iloc[-1] < close.iloc[-2]
+        exit_short = close.iloc[-1] > close.iloc[-2]
+    elif strategy == "Supertrend":
+        st = supertrend(df, params["period"], params["mult"])
+        entry_long = (st.iloc[-1] == 1) and (st.iloc[-2] == -1)
+        entry_short = (st.iloc[-1] == -1) and (st.iloc[-2] == 1)
+        exit_long = st.iloc[-1] == -1
+        exit_short = st.iloc[-1] == 1
+    else:
+        raise ValueError(strategy)
+    return {
+        "entry_long": bool(entry_long),
+        "entry_short": bool(entry_short),
+        "exit_long": bool(exit_long),
+        "exit_short": bool(exit_short),
+    }
+
+# ============================================================
+# ACCOUNT & ORDER HELPERS
+# ============================================================
+def get_usdt_balance() -> float:
+    balances = client.futures_account_balance()
+    for b in balances:
+        if b["asset"] == "USDT":
+            return float(b["availableBalance"])
+    return 0.0
+
+def get_symbol_info(symbol: str) -> dict:
+    info = client.futures_exchange_info()
+    for s in info["symbols"]:
+        if s["symbol"] == symbol:
+            return s
+    raise ValueError(f"Symbol not found: {symbol}")
+
+def get_qty_step(symbol: str) -> Decimal:
+    info = get_symbol_info(symbol)
+    for f in info["filters"]:
+        if f["filterType"] == "LOT_SIZE":
+            return Decimal(f["stepSize"])
+    return Decimal("0.001")
+
+def round_qty(qty: float, step: Decimal) -> Decimal:
+    q = Decimal(str(qty))
+    return (q / step).to_integral_value(rounding=ROUND_DOWN) * step
+
+def get_last_price(symbol: str) -> float:
+    t = client.futures_symbol_ticker(symbol=symbol)
+    return float(t["price"])
+
+def set_leverage(symbol: str, leverage: int = LEVERAGE):
+    try:
+        client.futures_change_leverage(symbol=symbol, leverage=leverage)
+    except BinanceAPIException as e:
+        print(f"  [LEVERAGE] {symbol}: {e.message}")
+
+def get_open_position(symbol: str) -> dict | None:
+    positions = client.futures_position_information(symbol=symbol)
+    for p in positions:
+        if float(p["positionAmt"]) != 0:
+            return p
     return None
 
 # ============================================================
-# Main Execution
+# TRADE EXECUTION
 # ============================================================
-def run_scan():
-    now = datetime.now(timezone.utc)
-    print("=" * 70)
-    print(f"Alpaca Bot — {now.strftime('%Y-%m-%d %H:%M UTC')}")
-    
-    open_positions = get_positions()
-    print(f"Open Positions: {len(open_positions)}")
-    
-    # 👇 1. ارسال پیام ضربان قلب (Heartbeat) در شروع هر اجرا 👇
-    heartbeat_msg = f"🤖 <b>ربات اجرا شد</b>\nزمان: {now.strftime('%H:%M')} UTC\nپوزیشن‌های باز: {len(open_positions)}\n"
-    
-    new_action_taken = False
+def open_position(symbol: str, side: str, balance: float, atr_df: pd.DataFrame):
+    price = get_last_price(symbol)
+    atr_val = atr(atr_df, 14).iloc[-1]
+    if np.isnan(atr_val) or atr_val <= 0:
+        print(f"  [SKIP] invalid ATR for {symbol}")
+        return
 
-    for strat in MASTER_STRATEGIES:
-        sym = strat["symbol"]
-        tf = strat["tf"]
-        stype = strat["type"]
-        params = strat["params"]
-        
-        clean_sym = sym.replace("/", "")
-        df = get_klines(sym, tf)
-        if df is None or len(df) < 50: 
+    sl_dist = atr_val * SL_ATR_MULT
+    tp_dist = sl_dist * TP_ATR_MULT
+    risk_usdt = balance * RISK_PCT
+    qty_raw = risk_usdt / sl_dist
+    step = get_qty_step(symbol)
+    qty = round_qty(qty_raw, step)
+
+    if qty <= 0:
+        print(f"  [SKIP] qty=0 for {symbol}")
+        return
+
+    set_leverage(symbol)
+
+    order_side = "BUY" if side == "LONG" else "SELL"
+    try:
+        order = client.futures_create_order(
+            symbol=symbol,
+            side=order_side,
+            type="MARKET",
+            quantity=str(qty),
+        )
+        print(f"  ✅ {side} {symbol} | qty={qty} | price≈{price:.4f}")
+    except BinanceAPIException as e:
+        print(f"  [ORDER FAILED] {symbol} {side}: {e.message}")
+        return
+
+    # ثبت SL و TP به‌صورت سفارش شرطی
+    if side == "LONG":
+        sl_price = round(price - sl_dist, 4)
+        tp_price = round(price + tp_dist, 4)
+        close_side = "SELL"
+    else:
+        sl_price = round(price + sl_dist, 4)
+        tp_price = round(price - tp_dist, 4)
+        close_side = "BUY"
+
+    for typ, stop in [("STOP_MARKET", sl_price), ("TAKE_PROFIT_MARKET", tp_price)]:
+        try:
+            client.futures_create_order(
+                symbol=symbol,
+                side=close_side,
+                type=typ,
+                stopPrice=stop,
+                closePosition=True,
+                workingType="MARK_PRICE",
+            )
+        except BinanceAPIException as e:
+            print(f"     [{typ} WARN] {e.message}")
+
+    print(f"     SL≈{sl_price} | TP≈{tp_price}")
+
+def close_position(symbol: str):
+    pos = get_open_position(symbol)
+    if pos is None:
+        return
+    amt = float(pos["positionAmt"])
+    if amt == 0:
+        return
+    close_side = "SELL" if amt > 0 else "BUY"
+    try:
+        client.futures_create_order(
+            symbol=symbol,
+            side=close_side,
+            type="MARKET",
+            quantity=str(abs(amt)),
+            reduceOnly=True,
+        )
+        print(f"  🔒 Closed {symbol} | amt={abs(amt)}")
+    except BinanceAPIException as e:
+        print(f"  [CLOSE FAILED] {symbol}: {e.message}")
+
+# ============================================================
+# MAIN LOOP
+# ============================================================
+def main():
+    # خواندن configs و فیلتر USDT
+    with open(CONFIG_FILE) as f:
+        raw_configs = json.load(f)["configs"]
+
+    configs = []
+    skipped = 0
+    for c in raw_configs:
+        base, quote = c["symbol"].split("/")
+        if quote != SUPPORTED_QUOTE:
+            skipped += 1
             continue
-        
-        current_pos = open_positions.get(clean_sym)
-        current_side = ""
-        if current_pos:
-            current_side = "LONG" if current_pos['side'].lower() == "buy" or current_pos.get('qty', 0) > 0 else "SHORT"
-            
-        action = check_signal(df, stype, params, current_side)
-        
-        if action == "CLOSE" and current_pos:
-            print(f"  🔴 CLOSING {sym} {current_side} ({stype} Exit)")
-            close_position(sym, current_side, current_pos['qty'])
-            send_telegram(f"🔴 <b>Position Closed</b>\n{sym} {current_side}\nStrategy: {stype} ({tf})")
-            new_action_taken = True
-            
-        elif action in ("LONG", "SHORT") and not current_pos:
-            print(f"  🟢 OPENING {sym} {action} ({stype} {tf})")
-            resp = open_position(sym, action, RISK_PER_TRADE_USD)
-            if resp:
-                msg = (f"🟢 <b>Position Opened</b>\n"
-                       f"Symbol: <b>{sym}</b>\n"
-                       f"Side: <b>{action}</b>\n"
-                       f"Strategy: {stype} ({tf})\n"
-                       f"Margin: ${RISK_PER_TRADE_USD}")
-                send_telegram(msg)
-                new_action_taken = True
+        # بررسی وجود نماد در بایننس فیوچرز
+        try:
+            get_symbol_info(to_binance_symbol(c["symbol"]))
+            configs.append(c)
+        except Exception:
+            skipped += 1
 
-    # 👇 2. اگر هیچ معامله‌ای انجام نشد، پیام وضعیت بفرست 👇
-    if not new_action_taken:
-        print("  No new signals. Sending heartbeat.")
-        send_telegram(heartbeat_msg)
+    print(f"Loaded {len(configs)} tradable configs (skipped {skipped} non-USDT or unavailable).")
+    print("Using Binance Futures Testnet.\n")
+    for c in configs:
+        print(f"  → {c['symbol']:10s} {c['timeframe']:4s} {c['strategy']:10s}")
+    print()
 
-    print("Scan complete.")
-    return 0
+    last_checked = {}
+
+    while True:
+        try:
+            balance = get_usdt_balance()
+            print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC] USDT: {balance:.2f}")
+
+            for cfg in configs:
+                sym_pair = cfg["symbol"]
+                sym = to_binance_symbol(sym_pair)
+                tf = cfg["timeframe"]
+                strat = cfg["strategy"]
+                params = eval(cfg["params"]) if isinstance(cfg["params"], str) else cfg["params"]
+
+                interval_sec = TF_TO_SECONDS[tf]
+                now = time.time()
+                key = (sym, tf)
+
+                if key in last_checked and now - last_checked[key] < interval_sec:
+                    continue
+
+                try:
+                    df = fetch_klines(sym_pair, TF_TO_INTERVAL[tf])
+                except BinanceAPIException as e:
+                    print(f"  [DATA] {sym_pair} {tf}: {e.message}")
+                    continue
+
+                if len(df) < 60:
+                    continue
+
+                try:
+                    sig = generate_signal(df, strat, params)
+                except Exception as e:
+                    print(f"  [SIGNAL] {sym_pair} {tf}: {e}")
+                    continue
+
+                pos = get_open_position(sym)
+                if pos is not None:
+                    amt = float(pos["positionAmt"])
+                    if amt > 0 and sig["exit_long"]:
+                        print(f"  🚪 Exit LONG: {sym_pair} {tf}")
+                        close_position(sym)
+                    elif amt < 0 and sig["exit_short"]:
+                        print(f"  🚪 Exit SHORT: {sym_pair} {tf}")
+                        close_position(sym)
+                    last_checked[key] = now
+                    continue
+
+                if sig["entry_long"]:
+                    print(f"  📈 LONG: {sym_pair} {tf} {strat}")
+                    open_position(sym, "LONG", balance, df)
+                elif sig["entry_short"]:
+                    print(f"  📉 SHORT: {sym_pair} {tf} {strat}")
+                    open_position(sym, "SHORT", balance, df)
+
+                last_checked[key] = now
+
+            time.sleep(10)
+
+        except KeyboardInterrupt:
+            print("\nStopped.")
+            break
+        except Exception as e:
+            print(f"[LOOP ERROR] {e}")
+            time.sleep(30)
 
 if __name__ == "__main__":
-    sys.exit(run_scan())
+    main()
