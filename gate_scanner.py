@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Final Fixed Version
-======================================================
-- Fixes SL/TP errors: initial.size=0, initial.close=True
-- Rounds trigger prices to contract tick size
-- USDT only (no USDC calls)
-- 53 configs, single-shot for GitHub Actions
+Gate.io Futures TestNet Scanner + Telegram Notifications
+=========================================================
 """
 
 import os
@@ -24,6 +20,32 @@ from gate_api.models import FuturesOrder, FuturesPriceTriggeredOrder, FuturesIni
 API_KEY    = "b37ed23f61f92662e11ba8b247adfb3b"
 API_SECRET = "39395a011e7d170e4b955c3060692ed5bfe3f380cd470717dbbc516b03a73fea"
 GATE_HOST  = "https://api-testnet.gateapi.io/api/v4"
+
+# ============================================================
+# 📱 TELEGRAM CONFIG (اضافه شد)
+# ============================================================
+TG_TOKEN   = "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo"
+TG_CHAT_ID = "254500349"
+
+def send_telegram(text: str):
+    """ارسال پیام به تلگرام — در صورت خطا، اجرای اصلی متوقف نمی‌شود."""
+    if not TG_TOKEN or not TG_CHAT_ID:
+        return
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+            json={
+                "chat_id": TG_CHAT_ID,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            },
+            timeout=10,
+        )
+        if r.status_code != 200:
+            print(f"  [TG] Failed: {r.text[:100]}")
+    except Exception as e:
+        print(f"  [TG] Error: {e}")
 
 if "testnet" not in GATE_HOST.lower():
     sys.exit(99)
@@ -79,33 +101,33 @@ BEST_CONFIGS = [
     {"symbol": "AAVE/USDT", "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
     {"symbol": "BTC/USDC",  "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
     {"symbol": "AVAX/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-    {"symbol": "SHIB/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "PEPE/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "DOGE/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "ADA/USDT",   "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
-    {"symbol": "NEAR/USDT",  "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "INJ/USDT",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "OP/USDT",    "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "SOL/USDT",   "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
-    {"symbol": "WIF/USDT",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 3, "factor": 3.0}},
-    {"symbol": "ICP/USDT",   "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "SEI/USDT",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "WLD/USDT",   "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
-    {"symbol": "THETA/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "STX/USDT",   "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
-    {"symbol": "RUNE/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "HBAR/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "GALA/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
-    {"symbol": "BONK/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "NOT/USDT",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "TRX/USDT",   "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "TON/USDT",   "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
-    {"symbol": "SAND/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
-    {"symbol": "MANA/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "SHIB/USDT", "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "PEPE/USDT", "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "DOGE/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "ADA/USDT",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
+    {"symbol": "NEAR/USDT", "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "INJ/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "OP/USDT",   "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "SOL/USDT",  "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
+    {"symbol": "WIF/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 3, "factor": 3.0}},
+    {"symbol": "ICP/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "SEI/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "WLD/USDT",  "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "THETA/USDT","timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "STX/USDT",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
+    {"symbol": "RUNE/USDT", "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "HBAR/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "GALA/USDT", "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "BONK/USDT", "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "NOT/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "TRX/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "TON/USDT",  "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
+    {"symbol": "SAND/USDT", "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "MANA/USDT", "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
 ]
 
 # ============================================================
-# CLIENT (USDT ONLY)
+# CLIENT
 # ============================================================
 config = Configuration(key=API_KEY, secret=API_SECRET, host=GATE_HOST)
 futures_api = FuturesApi(ApiClient(config))
@@ -118,8 +140,7 @@ def get_contracts():
     if "usdt" not in _contracts_cache:
         try:
             _contracts_cache["usdt"] = futures_api.list_futures_contracts("usdt")
-        except Exception as e:
-            print(f"  [CACHE] contracts usdt: {e}")
+        except Exception:
             _contracts_cache["usdt"] = []
     return _contracts_cache["usdt"]
 
@@ -138,8 +159,8 @@ def get_contract_specs(contract):
             return spec
     return {"quanto_multiplier": 1.0, "order_size_min": 1, "order_size_max": MAX_CONTRACTS, "order_price_round": 0.0001}
 
-def round_to_tick(price, tick_size):
-    return round(price / tick_size) * tick_size
+def round_to_tick(price, tick):
+    return round(price / tick) * tick
 
 # ============================================================
 # INDICATORS
@@ -243,9 +264,6 @@ def fetch_gate_candles(contract, timeframe, limit=200):
     except Exception:
         return None
 
-# ============================================================
-# CONTRACT RESOLUTION
-# ============================================================
 def resolve_contract(symbol):
     base = symbol.split("/")[0]
     alt = f"{base}_USDT"
@@ -255,7 +273,7 @@ def resolve_contract(symbol):
     return None
 
 # ============================================================
-# ACCOUNT / POSITION
+# ACCOUNT
 # ============================================================
 def get_equity():
     try:
@@ -283,6 +301,7 @@ def place_market_order(contract, size):
         return True
     except Exception as e:
         print(f"  ❌ Market failed {contract}: {e}")
+        send_telegram(f"❌ <b>Market failed</b>\n{contract}\n<code>{e}</code>")
         return False
 
 def close_position_market(contract, current_size):
@@ -293,7 +312,7 @@ def close_position_market(contract, current_size):
     except Exception as e:
         print(f"  ❌ Close failed {contract}: {e}")
 
-def place_sl_tp_orders(contract, side, sl_price, tp_price):
+def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
     specs = get_contract_specs(contract)
     tick = specs["order_price_round"]
     sl_price = round_to_tick(sl_price, tick)
@@ -305,19 +324,12 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price):
     for kind, price, rule in [("SL", sl_price, sl_rule), ("TP", tp_price, tp_rule)]:
         order = FuturesPriceTriggeredOrder(
             initial=FuturesInitialOrder(
-                contract=contract,
-                size=0,
-                price="0",
-                tif="ioc",
-                reduce_only=True,
-                close=True,
+                contract=contract, size=0, price="0",
+                tif="ioc", reduce_only=True, close=True,
             ),
             trigger=FuturesPriceTrigger(
-                strategy_type=0,
-                price_type=0,
-                price=str(price),
-                rule=rule,
-                expiration=86400,
+                strategy_type=0, price_type=0,
+                price=str(price), rule=rule, expiration=86400,
             ),
             order_type=f"close-{side}-order",
         )
@@ -338,7 +350,6 @@ def process_config(cfg):
 
     contract = resolve_contract(symbol)
     if contract is None:
-        print(f"  ⚠️ {symbol}: no contract on Gate.io TestNet")
         return
 
     df = fetch_gate_candles(contract, tf, limit=200)
@@ -370,18 +381,46 @@ def process_config(cfg):
             return
 
         if signal == 1:
+            side = "long"
+            emoji = "📈"
+            label = "LONG"
             print(f"  📈 LONG {symbol} {tf} {strat} size={size}")
-            if place_market_order(contract, size):
-                place_sl_tp_orders(contract, "long", price - sl_dist, price + tp_dist)
-        elif signal == -1:
+        else:
+            side = "short"
+            emoji = "📉"
+            label = "SHORT"
             print(f"  📉 SHORT {symbol} {tf} {strat} size={size}")
+
+        # ارسال به تلگرام
+        msg = (
+            f"{emoji} <b>{label}</b> {symbol} <code>{tf}</code>\n"
+            f"🎯 Strategy: <b>{strat}</b>\n"
+            f"💰 Entry: <code>{price:.6f}</code>\n"
+            f"📦 Size: <code>{size}</code>\n"
+            f"🛡️ SL: <code>{price - sl_dist if side == 'long' else price + sl_dist:.6f}</code>\n"
+            f"🎯 TP: <code>{price + tp_dist if side == 'long' else price - tp_dist:.6f}</code>\n"
+            f"🧪 <i>TESTNET — NO REAL MONEY</i>"
+        )
+        send_telegram(msg)
+
+        if side == "long":
+            if place_market_order(contract, size):
+                place_sl_tp_orders(contract, "long", price - sl_dist, price + tp_dist, price, size)
+        else:
             if place_market_order(contract, -size):
-                place_sl_tp_orders(contract, "short", price + sl_dist, price - tp_dist)
+                place_sl_tp_orders(contract, "short", price + sl_dist, price - tp_dist, price, size)
 
     elif current_pos != 0:
         if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
             print(f"  🔄 Reverse {symbol}, closing")
             close_position_market(contract, current_pos)
+            side_label = "LONG" if current_pos > 0 else "SHORT"
+            send_telegram(
+                f"🚪 <b>CLOSED</b> {side_label} {symbol} <code>{tf}</code>\n"
+                f"🎯 Strategy: <b>{strat}</b>\n"
+                f"📦 Size: <code>{abs(current_pos)}</code>\n"
+                f"🧪 <i>TESTNET</i>"
+            )
 
 # ============================================================
 # MAIN
@@ -396,13 +435,22 @@ def main():
 
     try:
         acc = futures_api.list_futures_accounts("usdt")
-        print(f"\n✅ Connected. USDT equity: {float(acc.total):.2f}\n")
+        equity = float(acc.total)
+        print(f"\n✅ Connected. USDT equity: {equity:.2f}\n")
     except Exception as e:
         print(f"❌ Connection failed: {e}")
+        send_telegram(f"❌ <b>Connection failed</b>\n<code>{e}</code>")
         sys.exit(1)
 
-    _equity_cache["usdt"] = get_equity()
-    print(f"💰 USDT equity: {_equity_cache['usdt']:.2f}")
+    _equity_cache["usdt"] = equity
+
+    # پیام شروع به تلگرام
+    send_telegram(
+        f"🧪 <b>Gate.io TestNet Scanner — Run Started</b>\n"
+        f"💰 Equity: <code>${equity:.2f} USDT</code>\n"
+        f"📊 Configs: <code>{len(BEST_CONFIGS)}</code>\n"
+        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
+    )
 
     print(f"\n🚀 Processing {len(BEST_CONFIGS)} configs...\n")
 
