@@ -2,9 +2,8 @@ name: Binance Demo Futures Scanner (30m)
 
 on:
   schedule:
-    # اجرای خودکار هر ۳۰ دقیقه
     - cron: '*/30 * * * *'
-  workflow_dispatch: # اجازه اجرای دستی
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,11 +22,12 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas numpy python-binance
+          pip install -r requirements.txt
 
       - name: Verify best_configs.json
         run: |
