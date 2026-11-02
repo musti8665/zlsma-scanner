@@ -1,89 +1,164 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Live Binance Futures Testnet Trader
-====================================
-- Reads best_configs.json
-- Filters to only USDT-quoted symbols (Binance USD-M Futures)
-- Polls closed candles, generates signals, places market orders
-- Supports real Long/Short with exchange-side SL/TP
-- Uses Binance Futures Testnet (testnet.binancefuture.com)
+Gate.io Futures TestNet Scanner — Full Symbol List
+====================================================
+- ALL 30 original optimized configs kept (USDC, USDT, BTC, USD)
+- PLUS 23 extra popular symbols user requested
+- Hardcoded TestNet keys (safe — demo only, no real money)
+- Single-shot for GitHub Actions
 """
 
 import os
-import json
-import time
-from datetime import datetime, timezone
-from decimal import Decimal, ROUND_DOWN
-
-import pandas as pd
+import sys
+import requests
 import numpy as np
-from binance.client import Client
-from binance.exceptions import BinanceAPIException
+import pandas as pd
+from datetime import datetime, timezone
+from gate_api import ApiClient, Configuration, FuturesApi
+from gate_api.models import FuturesOrder, FuturesPriceTriggeredOrder, FuturesInitialOrder, FuturesPriceTrigger
 
 # ============================================================
-# CONFIG
+# 🧪 TESTNET KEYS — HARDCODED (DEMO ONLY)
 # ============================================================
-API_KEY = os.environ.get("BINANCE_API_KEY", "qGEVAOupRbdzcUf3LCOFmpHVoBvncqO4R8lJQSHYNrEe8MthJ4OoFTRClJ3le5Ng")
-API_SECRET = os.environ.get("BINANCE_API_SECRET", "iRXxFB4hrhjVCVlM4fOnAEAz0tam1xR1zcWm8Db0vta46y8c3Pn6vDzP5RkS1Ixs")
+API_KEY    = "b37ed23f61f92662e11ba8b247adfb3b"
+API_SECRET = "39395a011e7d170e4b955c3060692ed5bfe3f380cd470717dbbc516b03a73fea"
+GATE_HOST  = "https://fx-api-testnet.gateio.ws/api/v4"
 
-CONFIG_FILE = "best_configs.json"
+# 🛡️ hard safety check
+if "testnet" not in GATE_HOST:
+    print("❌ FATAL: non-TestNet host. Aborting.")
+    sys.exit(99)
 
-RISK_PCT = 0.02
-LEVERAGE = 3
-SL_ATR_MULT = 2.5
-TP_ATR_MULT = 2.5
-
-TF_TO_INTERVAL = {"5m": "5m", "15m": "15m", "30m": "30m"}
-TF_TO_SECONDS = {"5m": 300, "15m": 900, "30m": 1800}
-
-# فقط نمادهایی که در بایننس فیوچرز موجودند
-SUPPORTED_QUOTE = "USDT"
-
-# ============================================================
-# BINANCE CLIENT (TESTNET)
-# ============================================================
-client = Client(API_KEY, API_SECRET, testnet=True)
-
-def to_binance_symbol(symbol: str) -> str:
-    return symbol.replace("/", "")
+BANNER = """
+╔══════════════════════════════════════════════════════════════════════╗
+║   🧪  GATE.IO FUTURES — TESTNET (DEMO)                               ║
+║   ✅  VIRTUAL FUNDS ONLY — NO REAL MONEY                             ║
+║   🌐  https://fx-api-testnet.gateio.ws/api/v4                        ║
+╚══════════════════════════════════════════════════════════════════════╝
+"""
+print(BANNER)
 
 # ============================================================
-# DATA FETCH
+# PARAMETERS
 # ============================================================
-def fetch_klines(symbol: str, interval: str, limit: int = 200) -> pd.DataFrame:
-    """کندل‌های بسته‌شده را برمی‌گرداند (کندل آخر حذف می‌شود)."""
-    raw = client.futures_klines(
-        symbol=to_binance_symbol(symbol),
-        interval=interval,
-        limit=limit,
-    )
-    df = pd.DataFrame(raw, columns=[
-        "t", "open", "high", "low", "close", "volume",
-        "close_time", "quote_vol", "trades", "tb_base", "tb_quote", "ignore"
-    ])
-    df["t"] = pd.to_datetime(df["t"], unit="ms", utc=True)
-    df = df.set_index("t").sort_index()
-    for c in ["open", "high", "low", "close", "volume"]:
-        df[c] = df[c].astype(float)
-    # حذف کندل آخر که هنوز بسته نشده
-    return df.iloc[:-1]
+RISK_PCT      = 0.02
+ATR_MULT_SL   = 2.5
+ATR_MULT_TP   = 2.5
+MAX_CONTRACTS = 1_000_000
+LOG_FILE      = "gate_scanner_log.jsonl"
 
 # ============================================================
-# INDICATORS (همان منطق)
+# CONFIGS — FULL LIST (30 original + 23 extra = 53 total)
 # ============================================================
-def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+BEST_CONFIGS = [
+    # ===== 30 ORIGINAL (from walk-forward optimization) =====
+    {"symbol": "BCH/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "AVAX/USDC", "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 20}},
+    {"symbol": "DOT/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
+    {"symbol": "GRT/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "BCH/USDC",  "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "DOT/USDC",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
+    {"symbol": "AVAX/USDC", "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "BTC/USDT",  "timeframe": "5m",  "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "AVAX/USD",  "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
+    {"symbol": "HYPE/USD",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 3, "factor": 4.236}},
+    {"symbol": "CRV/USDC",  "timeframe": "5m",  "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 4.236}},
+    {"symbol": "LDO/USD",   "timeframe": "5m",  "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 2.5}},
+    {"symbol": "CRV/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 50}},
+    {"symbol": "ETH/BTC",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "ETH/USDC",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
+    {"symbol": "AVAX/USDT", "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
+    {"symbol": "CRV/USD",   "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
+    {"symbol": "LINK/BTC",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
+    {"symbol": "ETH/BTC",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 2.5}},
+    {"symbol": "ETH/USDT",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
+    {"symbol": "CRV/USDC",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
+    {"symbol": "LDO/USD",   "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
+    {"symbol": "ARB/USD",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "AVAX/USDT", "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
+    {"symbol": "FIL/USD",   "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 20}},
+    {"symbol": "FIL/USD",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "AAVE/USDC", "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 50}},
+    {"symbol": "AAVE/USDT", "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
+    {"symbol": "BTC/USDC",  "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
+    {"symbol": "AVAX/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
+
+    # ===== 23 EXTRA POPULAR SYMBOLS (user-requested) =====
+    {"symbol": "SHIB/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "PEPE/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "DOGE/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "ADA/USDT",   "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
+    {"symbol": "NEAR/USDT",  "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "INJ/USDT",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "OP/USDT",    "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "SOL/USDT",   "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
+    {"symbol": "WIF/USDT",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 3, "factor": 3.0}},
+    {"symbol": "ICP/USDT",   "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "SEI/USDT",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "WLD/USDT",   "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "THETA/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "STX/USDT",   "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
+    {"symbol": "RUNE/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "HBAR/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "GALA/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "BONK/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "NOT/USDT",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
+    {"symbol": "TRX/USDT",   "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    {"symbol": "TON/USDT",   "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
+    {"symbol": "SAND/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+    {"symbol": "MANA/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
+]
+
+# ============================================================
+# CLIENT
+# ============================================================
+futures_api = FuturesApi(ApiClient(Configuration(key=API_KEY, secret=API_SECRET, host=GATE_HOST)))
+
+# caches
+_contracts_cache: dict = {}
+_specs_cache:     dict = {}
+_equity_cache:    dict = {}
+
+def get_contracts(settle):
+    if settle not in _contracts_cache:
+        try:
+            _contracts_cache[settle] = futures_api.list_futures_contracts(settle)
+        except Exception as e:
+            print(f"  [CACHE] contracts {settle}: {e}")
+            _contracts_cache[settle] = []
+    return _contracts_cache[settle]
+
+def get_contract_specs(contract, settle):
+    key = (contract, settle)
+    if key in _specs_cache:
+        return _specs_cache[key]
+    for c in get_contracts(settle):
+        if c.name == contract:
+            spec = {
+                "quanto_multiplier": float(c.quanto_multiplier),
+                "order_size_min": int(c.order_size_min),
+                "order_size_max": int(c.order_size_max),
+            }
+            _specs_cache[key] = spec
+            return spec
+    return {"quanto_multiplier": 1.0, "order_size_min": 1, "order_size_max": MAX_CONTRACTS}
+
+# ============================================================
+# INDICATORS
+# ============================================================
+def atr(df, period=14):
     h, l, c = df["high"], df["low"], df["close"]
     tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
     return tr.ewm(alpha=1 / period, adjust=False).mean()
 
-def rsi(series: pd.Series, period: int = 14) -> pd.Series:
+def rsi(series, period=14):
     delta = series.diff()
     gain = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
     loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
     return 100 - 100 / (1 + gain / loss.replace(0, np.nan))
 
-def supertrend(df: pd.DataFrame, period: int = 10, mult: float = 3.0) -> pd.Series:
+def supertrend(df, period=10, mult=3.0):
     h, l, c = df["high"].values, df["low"].values, df["close"].values
     a = atr(df, period).values
     hl2 = (h + l) / 2
@@ -103,7 +178,7 @@ def supertrend(df: pd.DataFrame, period: int = 10, mult: float = 3.0) -> pd.Seri
         trend[i] = (-1 if c[i] < fl[i] else 1) if trend[i - 1] == 1 else (1 if c[i] > fu[i] else -1)
     return pd.Series(trend, index=df.index)
 
-def qqe(df: pd.DataFrame, rsi_p: int = 14, smooth: int = 5, factor: float = 4.236) -> pd.Series:
+def qqe(df, rsi_p=14, smooth=5, factor=4.236):
     c = df["close"]
     r = rsi(c, rsi_p)
     rma = r.ewm(span=smooth, adjust=False).mean()
@@ -111,8 +186,7 @@ def qqe(df: pd.DataFrame, rsi_p: int = 14, smooth: int = 5, factor: float = 4.23
     atr_r = rdiff.ewm(alpha=1 / (2 * rsi_p - 1), adjust=False).mean()
     dar = atr_r * factor
     n = len(c)
-    trend = np.zeros(n, dtype=int)
-    trend[0] = 1
+    trend = np.zeros(n, dtype=int); trend[0] = 1
     lb, sb = np.full(n, np.nan), np.full(n, np.nan)
     lb[0], sb[0] = rma.iloc[0] - dar.iloc[0], rma.iloc[0] + dar.iloc[0]
     rn, dn_arr = rma.values, dar.values
@@ -120,275 +194,240 @@ def qqe(df: pd.DataFrame, rsi_p: int = 14, smooth: int = 5, factor: float = 4.23
         nl, ns = rn[i] - dn_arr[i], rn[i] + dn_arr[i]
         lb[i] = max(lb[i - 1], nl) if (rn[i - 1] > lb[i - 1] and rn[i] > lb[i - 1]) else nl
         sb[i] = min(sb[i - 1], ns) if (rn[i - 1] < sb[i - 1] and rn[i] < sb[i - 1]) else ns
-        if rn[i] > sb[i - 1]:
-            trend[i] = 1
-        elif rn[i] < lb[i - 1]:
-            trend[i] = -1
-        else:
-            trend[i] = trend[i - 1]
+        if rn[i] > sb[i - 1]:   trend[i] = 1
+        elif rn[i] < lb[i - 1]: trend[i] = -1
+        else:                   trend[i] = trend[i - 1]
     return pd.Series(trend, index=df.index)
 
-def generate_signal(df: pd.DataFrame, strategy: str, params: dict) -> dict:
-    if strategy == "MACD":
-        close = df["close"]
+def generate_signal(df, strat, params):
+    if len(df) < 2:
+        return 0
+    close = df["close"]
+    if strat == "MACD":
         fast = close.ewm(span=params["fast"], adjust=False).mean()
         slow = close.ewm(span=params["slow"], adjust=False).mean()
         macd = fast - slow
-        sig = macd.ewm(span=params["signal"], adjust=False).mean()
-        hist = macd - sig
+        s = macd.ewm(span=params["signal"], adjust=False).mean()
+        hist = macd - s
         st = supertrend(df, 10, 3.0)
-        entry_long = (hist.iloc[-1] > 0) and (hist.iloc[-2] <= 0)
-        entry_short = (hist.iloc[-1] < 0) and (hist.iloc[-2] >= 0)
-        exit_long = (hist.iloc[-1] < 0) or (st.iloc[-1] == -1)
-        exit_short = (hist.iloc[-1] > 0) or (st.iloc[-1] == 1)
-    elif strategy == "QQE":
+        if hist.iloc[-1] > 0 and hist.iloc[-2] <= 0 and st.iloc[-1] == 1:  return 1
+        if hist.iloc[-1] < 0 and hist.iloc[-2] >= 0 and st.iloc[-1] == -1: return -1
+    elif strat == "QQE":
         q = qqe(df, params["rsi_period"], params["smooth"], params["factor"])
-        entry_long = (q.iloc[-1] == 1) and (q.iloc[-2] == -1)
-        entry_short = (q.iloc[-1] == -1) and (q.iloc[-2] == 1)
-        exit_long = q.iloc[-1] == -1
-        exit_short = q.iloc[-1] == 1
-    elif strategy == "Volume":
+        if q.iloc[-1] == 1  and q.iloc[-2] == -1: return 1
+        if q.iloc[-1] == -1 and q.iloc[-2] == 1:  return -1
+    elif strat == "Volume":
         vma = df["volume"].rolling(params["ma_period"]).mean()
-        vol_ok = df["volume"] > params["vol_mult"] * vma
-        close = df["close"]
-        entry_long = bool(vol_ok.iloc[-1] and close.iloc[-1] > close.iloc[-2])
-        entry_short = bool(vol_ok.iloc[-1] and close.iloc[-1] < close.iloc[-2])
-        exit_long = close.iloc[-1] < close.iloc[-2]
-        exit_short = close.iloc[-1] > close.iloc[-2]
-    elif strategy == "Supertrend":
+        if len(vma) < 2 or pd.isna(vma.iloc[-1]): return 0
+        vol_ok = df["volume"].iloc[-1] > params["vol_mult"] * vma.iloc[-1]
+        if vol_ok and close.iloc[-1] > close.iloc[-2]: return 1
+        if vol_ok and close.iloc[-1] < close.iloc[-2]: return -1
+    elif strat == "Supertrend":
         st = supertrend(df, params["period"], params["mult"])
-        entry_long = (st.iloc[-1] == 1) and (st.iloc[-2] == -1)
-        entry_short = (st.iloc[-1] == -1) and (st.iloc[-2] == 1)
-        exit_long = st.iloc[-1] == -1
-        exit_short = st.iloc[-1] == 1
-    else:
-        raise ValueError(strategy)
-    return {
-        "entry_long": bool(entry_long),
-        "entry_short": bool(entry_short),
-        "exit_long": bool(exit_long),
-        "exit_short": bool(exit_short),
-    }
+        if st.iloc[-1] == 1  and st.iloc[-2] == -1: return 1
+        if st.iloc[-1] == -1 and st.iloc[-2] == 1:  return -1
+    return 0
 
 # ============================================================
-# ACCOUNT & ORDER HELPERS
+# DATA
 # ============================================================
-def get_usdt_balance() -> float:
-    balances = client.futures_account_balance()
-    for b in balances:
-        if b["asset"] == "USDT":
-            return float(b["availableBalance"])
-    return 0.0
-
-def get_symbol_info(symbol: str) -> dict:
-    info = client.futures_exchange_info()
-    for s in info["symbols"]:
-        if s["symbol"] == symbol:
-            return s
-    raise ValueError(f"Symbol not found: {symbol}")
-
-def get_qty_step(symbol: str) -> Decimal:
-    info = get_symbol_info(symbol)
-    for f in info["filters"]:
-        if f["filterType"] == "LOT_SIZE":
-            return Decimal(f["stepSize"])
-    return Decimal("0.001")
-
-def round_qty(qty: float, step: Decimal) -> Decimal:
-    q = Decimal(str(qty))
-    return (q / step).to_integral_value(rounding=ROUND_DOWN) * step
-
-def get_last_price(symbol: str) -> float:
-    t = client.futures_symbol_ticker(symbol=symbol)
-    return float(t["price"])
-
-def set_leverage(symbol: str, leverage: int = LEVERAGE):
+def fetch_gate_candles(contract, settle, timeframe, limit=200):
+    url = f"{GATE_HOST}/futures/{settle}/candlesticks"
     try:
-        client.futures_change_leverage(symbol=symbol, leverage=leverage)
-    except BinanceAPIException as e:
-        print(f"  [LEVERAGE] {symbol}: {e.message}")
-
-def get_open_position(symbol: str) -> dict | None:
-    positions = client.futures_position_information(symbol=symbol)
-    for p in positions:
-        if float(p["positionAmt"]) != 0:
-            return p
-    return None
+        r = requests.get(url, params={
+            "contract": contract, "interval": timeframe, "limit": limit,
+        }, timeout=15)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if not data or len(data) < 50:
+            return None
+        df = pd.DataFrame(data)
+        df["t"] = pd.to_datetime(df["t"].astype(int), unit="s", utc=True)
+        df = df.set_index("t").sort_index()
+        for col in ["o", "h", "l", "c", "v"]:
+            df[col] = df[col].astype(float)
+        df.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"}, inplace=True)
+        return df
+    except Exception as e:
+        print(f"  ⚠️ fetch error {contract}: {e}")
+        return None
 
 # ============================================================
-# TRADE EXECUTION
+# CONTRACT RESOLUTION (handles USD, USDC, BTC, USDT with fallback)
 # ============================================================
-def open_position(symbol: str, side: str, balance: float, atr_df: pd.DataFrame):
-    price = get_last_price(symbol)
-    atr_val = atr(atr_df, 14).iloc[-1]
-    if np.isnan(atr_val) or atr_val <= 0:
-        print(f"  [SKIP] invalid ATR for {symbol}")
-        return
+def resolve_contract(symbol):
+    base, quote = symbol.split("/")
+    preferred = f"{base}_{quote}"
 
-    sl_dist = atr_val * SL_ATR_MULT
-    tp_dist = sl_dist * TP_ATR_MULT
-    risk_usdt = balance * RISK_PCT
-    qty_raw = risk_usdt / sl_dist
-    step = get_qty_step(symbol)
-    qty = round_qty(qty_raw, step)
+    # Try the exact quote first if it's a valid settle
+    if quote.lower() in ("usdt", "usdc"):
+        for c in get_contracts(quote.lower()):
+            if c.name == preferred:
+                return preferred, quote.lower()
 
-    if qty <= 0:
-        print(f"  [SKIP] qty=0 for {symbol}")
-        return
+    # Fallback: try USDT then USDC (covers USD, BTC, and any other quote)
+    alt = f"{base}_USDT"
+    for settle in ("usdt", "usdc"):
+        for c in get_contracts(settle):
+            if c.name == alt:
+                return alt, settle
 
-    set_leverage(symbol)
+    return None, None
 
-    order_side = "BUY" if side == "LONG" else "SELL"
+# ============================================================
+# ACCOUNT
+# ============================================================
+def get_equity(settle):
     try:
-        order = client.futures_create_order(
-            symbol=symbol,
-            side=order_side,
-            type="MARKET",
-            quantity=str(qty),
+        return float(futures_api.list_futures_accounts(settle).total)
+    except Exception:
+        return 0.0
+
+def get_position_size(contract, settle):
+    try:
+        for p in futures_api.list_positions(settle):
+            if p.contract == contract:
+                return int(p.size)
+    except Exception:
+        pass
+    return 0
+
+# ============================================================
+# ORDERS
+# ============================================================
+def place_market_order(contract, size, settle):
+    order = FuturesOrder(contract=contract, size=abs(size), price="0", tif="ioc", reduce_only=False)
+    try:
+        futures_api.create_futures_order(settle, order)
+        print(f"  🧪 [DEMO] {'LONG' if size > 0 else 'SHORT'} {contract} size={abs(size)}")
+        return True
+    except Exception as e:
+        print(f"  ❌ Market failed {contract}: {e}")
+        return False
+
+def close_position_market(contract, current_size, settle):
+    order = FuturesOrder(contract=contract, size=abs(current_size), price="0", tif="ioc", reduce_only=True)
+    try:
+        futures_api.create_futures_order(settle, order)
+        print(f"  🧪 [DEMO CLOSE] {contract} size={current_size}")
+    except Exception as e:
+        print(f"  ❌ Close failed {contract}: {e}")
+
+def place_sl_tp_orders(contract, settle, side, size, sl_price, tp_price):
+    sl_rule = 2 if side == "long" else 1
+    tp_rule = 1 if side == "long" else 2
+
+    for kind, price, rule in [("SL", sl_price, sl_rule), ("TP", tp_price, tp_rule)]:
+        order = FuturesPriceTriggeredOrder(
+            initial=FuturesInitialOrder(
+                contract=contract, size=size, price="0",
+                tif="ioc", reduce_only=True, close=True,
+            ),
+            trigger=FuturesPriceTrigger(
+                strategy_type=0, price_type=0,
+                price=str(price), rule=rule, expiration=86400,
+            ),
+            order_type=f"close-{side}-order",
         )
-        print(f"  ✅ {side} {symbol} | qty={qty} | price≈{price:.4f}")
-    except BinanceAPIException as e:
-        print(f"  [ORDER FAILED] {symbol} {side}: {e.message}")
-        return
-
-    # ثبت SL و TP به‌صورت سفارش شرطی
-    if side == "LONG":
-        sl_price = round(price - sl_dist, 4)
-        tp_price = round(price + tp_dist, 4)
-        close_side = "SELL"
-    else:
-        sl_price = round(price + sl_dist, 4)
-        tp_price = round(price - tp_dist, 4)
-        close_side = "BUY"
-
-    for typ, stop in [("STOP_MARKET", sl_price), ("TAKE_PROFIT_MARKET", tp_price)]:
         try:
-            client.futures_create_order(
-                symbol=symbol,
-                side=close_side,
-                type=typ,
-                stopPrice=stop,
-                closePosition=True,
-                workingType="MARK_PRICE",
-            )
-        except BinanceAPIException as e:
-            print(f"     [{typ} WARN] {e.message}")
-
-    print(f"     SL≈{sl_price} | TP≈{tp_price}")
-
-def close_position(symbol: str):
-    pos = get_open_position(symbol)
-    if pos is None:
-        return
-    amt = float(pos["positionAmt"])
-    if amt == 0:
-        return
-    close_side = "SELL" if amt > 0 else "BUY"
-    try:
-        client.futures_create_order(
-            symbol=symbol,
-            side=close_side,
-            type="MARKET",
-            quantity=str(abs(amt)),
-            reduceOnly=True,
-        )
-        print(f"  🔒 Closed {symbol} | amt={abs(amt)}")
-    except BinanceAPIException as e:
-        print(f"  [CLOSE FAILED] {symbol}: {e.message}")
+            futures_api.create_price_triggered_order(settle, order)
+            print(f"  🧪 [DEMO {kind}] {contract} @ {price:.6f}")
+        except Exception as e:
+            print(f"  ⚠️ {kind} failed {contract}: {e}")
 
 # ============================================================
-# MAIN LOOP
+# TRADING
+# ============================================================
+def process_config(cfg):
+    symbol = cfg["symbol"]
+    tf     = cfg["timeframe"]
+    strat  = cfg["strategy"]
+    params = cfg["params"]
+
+    contract, settle = resolve_contract(symbol)
+    if contract is None:
+        print(f"  ⚠️ {symbol}: no contract on Gate.io TestNet")
+        return
+
+    df = fetch_gate_candles(contract, settle, tf, limit=200)
+    if df is None or len(df) < 50:
+        return
+
+    current_pos = get_position_size(contract, settle)
+    signal = generate_signal(df, strat, params)
+
+    if signal != 0 and current_pos == 0:
+        atr_val = atr(df, 14).iloc[-1]
+        price = df["close"].iloc[-1]
+        if atr_val <= 0 or price <= 0:
+            return
+
+        specs = get_contract_specs(contract, settle)
+        multiplier = specs["quanto_multiplier"]
+        sl_dist = atr_val * ATR_MULT_SL
+        tp_dist = sl_dist * ATR_MULT_TP
+
+        equity = _equity_cache.get(settle, 0.0)
+        if equity <= 0:
+            print(f"  ⚠️ {symbol}: equity {settle}=0, skip")
+            return
+
+        risk_amount = equity * RISK_PCT
+        size = int(risk_amount / (multiplier * sl_dist))
+        size = max(specs["order_size_min"], min(size, specs["order_size_max"], MAX_CONTRACTS))
+        if size <= 0:
+            return
+
+        if signal == 1:
+            print(f"  📈 LONG {symbol} {tf} {strat} size={size}")
+            if place_market_order(contract, size, settle):
+                place_sl_tp_orders(contract, settle, "long", size,
+                                   price - sl_dist, price + tp_dist)
+        elif signal == -1:
+            print(f"  📉 SHORT {symbol} {tf} {strat} size={size}")
+            if place_market_order(contract, -size, settle):
+                place_sl_tp_orders(contract, settle, "short", size,
+                                   price + sl_dist, price - tp_dist)
+
+    elif current_pos != 0:
+        if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
+            print(f"  🔄 Reverse {symbol}, closing")
+            close_position_market(contract, current_pos, settle)
+
+# ============================================================
+# MAIN
 # ============================================================
 def main():
-    # خواندن configs و فیلتر USDT
-    with open(CONFIG_FILE) as f:
-        raw_configs = json.load(f)["configs"]
+    print("=" * 70)
+    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — NO REAL MONEY")
+    print(f"🌐 HOST        : {GATE_HOST}")
+    print(f"📊 CONFIGS     : {len(BEST_CONFIGS)}")
+    print(f"🕒 TIME        : {datetime.now(timezone.utc).isoformat()}")
+    print("=" * 70)
 
-    configs = []
-    skipped = 0
-    for c in raw_configs:
-        base, quote = c["symbol"].split("/")
-        if quote != SUPPORTED_QUOTE:
-            skipped += 1
-            continue
-        # بررسی وجود نماد در بایننس فیوچرز
+    try:
+        acc = futures_api.list_futures_accounts("usdt")
+        print(f"\n✅ Connected. USDT equity: {float(acc.total):.2f}\n")
+    except Exception as e:
+        print(f"❌ Connection failed: {e}")
+        sys.exit(1)
+
+    for settle in ("usdt", "usdc"):
+        eq = get_equity(settle)
+        if eq > 0:
+            _equity_cache[settle] = eq
+            print(f"💰 {settle.upper()} equity: {eq:.2f}")
+
+    print(f"\n🚀 Processing {len(BEST_CONFIGS)} configs...\n")
+
+    for cfg in BEST_CONFIGS:
         try:
-            get_symbol_info(to_binance_symbol(c["symbol"]))
-            configs.append(c)
-        except Exception:
-            skipped += 1
-
-    print(f"Loaded {len(configs)} tradable configs (skipped {skipped} non-USDT or unavailable).")
-    print("Using Binance Futures Testnet.\n")
-    for c in configs:
-        print(f"  → {c['symbol']:10s} {c['timeframe']:4s} {c['strategy']:10s}")
-    print()
-
-    last_checked = {}
-
-    while True:
-        try:
-            balance = get_usdt_balance()
-            print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC] USDT: {balance:.2f}")
-
-            for cfg in configs:
-                sym_pair = cfg["symbol"]
-                sym = to_binance_symbol(sym_pair)
-                tf = cfg["timeframe"]
-                strat = cfg["strategy"]
-                params = eval(cfg["params"]) if isinstance(cfg["params"], str) else cfg["params"]
-
-                interval_sec = TF_TO_SECONDS[tf]
-                now = time.time()
-                key = (sym, tf)
-
-                if key in last_checked and now - last_checked[key] < interval_sec:
-                    continue
-
-                try:
-                    df = fetch_klines(sym_pair, TF_TO_INTERVAL[tf])
-                except BinanceAPIException as e:
-                    print(f"  [DATA] {sym_pair} {tf}: {e.message}")
-                    continue
-
-                if len(df) < 60:
-                    continue
-
-                try:
-                    sig = generate_signal(df, strat, params)
-                except Exception as e:
-                    print(f"  [SIGNAL] {sym_pair} {tf}: {e}")
-                    continue
-
-                pos = get_open_position(sym)
-                if pos is not None:
-                    amt = float(pos["positionAmt"])
-                    if amt > 0 and sig["exit_long"]:
-                        print(f"  🚪 Exit LONG: {sym_pair} {tf}")
-                        close_position(sym)
-                    elif amt < 0 and sig["exit_short"]:
-                        print(f"  🚪 Exit SHORT: {sym_pair} {tf}")
-                        close_position(sym)
-                    last_checked[key] = now
-                    continue
-
-                if sig["entry_long"]:
-                    print(f"  📈 LONG: {sym_pair} {tf} {strat}")
-                    open_position(sym, "LONG", balance, df)
-                elif sig["entry_short"]:
-                    print(f"  📉 SHORT: {sym_pair} {tf} {strat}")
-                    open_position(sym, "SHORT", balance, df)
-
-                last_checked[key] = now
-
-            time.sleep(10)
-
-        except KeyboardInterrupt:
-            print("\nStopped.")
-            break
+            process_config(cfg)
         except Exception as e:
-            print(f"[LOOP ERROR] {e}")
-            time.sleep(30)
+            print(f"  ❌ {cfg['symbol']} {cfg['timeframe']}: {e}")
+
+    print(f"\n✅ Run complete — TESTNET (no real money touched)")
 
 if __name__ == "__main__":
     main()
