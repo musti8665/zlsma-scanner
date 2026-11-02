@@ -1,16 +1,42 @@
+name: Binance Demo Futures Scanner (30m)
+
+on:
+  schedule:
+    # اجرای خودکار هر ۳۰ دقیقه
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # اجازه اجرای دستی
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5   # ← از v4 به v5 ارتقا یافت
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v6   # ← از v5 به v6 ارتقا یافت
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Install deps
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install requests pandas numpy python-binance
+
+      - name: Verify best_configs.json
+        run: |
+          if [ ! -f best_configs.json ]; then
+            echo "❌ best_configs.json not found in repo!"
+            exit 1
+          fi
+          echo "✅ best_configs.json found"
+          python -c "import json; d=json.load(open('best_configs.json')); print(f\"Configs: {len(d.get('configs', []))}\")"
 
       - name: Run scanner
         env:
@@ -21,7 +47,7 @@
 
       - name: Commit and save logs
         if: always()
-        uses: stefanzweifel/git-auto-commit-action@v7   # ← از v5 به v7 ارتقا یافت
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "chore: auto-update bot logs [skip ci]"
           file_pattern: "*.json *.csv *.log"
