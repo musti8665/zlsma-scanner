@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Full Symbol List (Corrected Host)
-====================================================================
-- Uses official TestNet endpoint: https://api-testnet.gateapi.io/api/v4
-- 53 pre-optimized configs (30 original + 23 extra)
-- Single-shot execution for GitHub Actions
-- Hardcoded TestNet keys (demo only — no real money)
+Gate.io Futures TestNet Scanner — Final Clean Version
+======================================================
+- Supports USDT only (fixes USDC 400 error on TestNet)
+- 53 pre-optimized configs
+- Single-shot execution
+- Clean pandas syntax
 """
 
 import os
 import sys
-import json
 import requests
 import numpy as np
 import pandas as pd
@@ -20,17 +19,13 @@ from gate_api import ApiClient, Configuration, FuturesApi
 from gate_api.models import FuturesOrder, FuturesPriceTriggeredOrder, FuturesInitialOrder, FuturesPriceTrigger
 
 # ============================================================
-# 🧪 TESTNET KEYS — HARDCODED (DEMO ONLY)
+# 🧪 TESTNET KEYS
 # ============================================================
 API_KEY    = "b37ed23f61f92662e11ba8b247adfb3b"
 API_SECRET = "39395a011e7d170e4b955c3060692ed5bfe3f380cd470717dbbc516b03a73fea"
-
-# ✅ CORRECTED: Official TestNet host for Unified/Futures accounts
 GATE_HOST  = "https://api-testnet.gateapi.io/api/v4"
 
-# Safety: refuse non-TestNet hosts
 if "testnet" not in GATE_HOST.lower():
-    print("❌ FATAL: non-TestNet host detected. Aborting.")
     sys.exit(99)
 
 BANNER = """
@@ -49,13 +44,12 @@ RISK_PCT      = 0.02
 ATR_MULT_SL   = 2.5
 ATR_MULT_TP   = 2.5
 MAX_CONTRACTS = 1_000_000
-LOG_FILE      = "gate_scanner_log.jsonl"
 
 # ============================================================
-# CONFIGS — FULL LIST (30 original + 23 extra = 53 total)
+# CONFIGS (53 TOTAL)
 # ============================================================
 BEST_CONFIGS = [
-    # ===== 30 ORIGINAL (from walk-forward optimization) =====
+    # 30 Original
     {"symbol": "BCH/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
     {"symbol": "AVAX/USDC", "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 20}},
     {"symbol": "DOT/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
@@ -87,7 +81,7 @@ BEST_CONFIGS = [
     {"symbol": "BTC/USDC",  "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
     {"symbol": "AVAX/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
 
-    # ===== 23 EXTRA POPULAR SYMBOLS =====
+    # 23 Extra
     {"symbol": "SHIB/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
     {"symbol": "PEPE/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
     {"symbol": "DOGE/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
@@ -114,37 +108,36 @@ BEST_CONFIGS = [
 ]
 
 # ============================================================
-# CLIENT
+# CLIENT (USDT ONLY — Fixes USDC error)
 # ============================================================
 config = Configuration(key=API_KEY, secret=API_SECRET, host=GATE_HOST)
 futures_api = FuturesApi(ApiClient(config))
 
-# caches
 _contracts_cache: dict = {}
 _specs_cache:     dict = {}
 _equity_cache:    dict = {}
 
-def get_contracts(settle):
-    if settle not in _contracts_cache:
+def get_contracts():
+    """Fetch USDT contracts only."""
+    if "usdt" not in _contracts_cache:
         try:
-            _contracts_cache[settle] = futures_api.list_futures_contracts(settle)
+            _contracts_cache["usdt"] = futures_api.list_futures_contracts("usdt")
         except Exception as e:
-            print(f"  [CACHE] contracts {settle}: {e}")
-            _contracts_cache[settle] = []
-    return _contracts_cache[settle]
+            print(f"  [CACHE] contracts usdt: {e}")
+            _contracts_cache["usdt"] = []
+    return _contracts_cache["usdt"]
 
-def get_contract_specs(contract, settle):
-    key = (contract, settle)
-    if key in _specs_cache:
-        return _specs_cache[key]
-    for c in get_contracts(settle):
+def get_contract_specs(contract):
+    if contract in _specs_cache:
+        return _specs_cache[contract]
+    for c in get_contracts():
         if c.name == contract:
             spec = {
                 "quanto_multiplier": float(c.quanto_multiplier),
                 "order_size_min": int(c.order_size_min),
                 "order_size_max": int(c.order_size_max),
             }
-            _specs_cache[key] = spec
+            _specs_cache[contract] = spec
             return spec
     return {"quanto_multiplier": 1.0, "order_size_min": 1, "order_size_max": MAX_CONTRACTS}
 
@@ -171,8 +164,7 @@ def supertrend(df, period=10, mult=3.0):
     fu, fl = np.full(n, np.nan), np.full(n, np.nan)
     trend = np.ones(n, dtype=int)
     for i in range(int(period), n):
-        if np.isnan(up_u[i]):
-            continue
+        if np.isnan(up_u[i]): continue
         if np.isnan(fu[i - 1]):
             fu[i], fl[i] = up_u[i], up_l[i]
             trend[i] = 1 if c[i] > fl[i] else -1
@@ -204,8 +196,7 @@ def qqe(df, rsi_p=14, smooth=5, factor=4.236):
     return pd.Series(trend, index=df.index)
 
 def generate_signal(df, strat, params):
-    if len(df) < 2:
-        return 0
+    if len(df) < 2: return 0
     close = df["close"]
     if strat == "MACD":
         fast = close.ewm(span=params["fast"], adjust=False).mean()
@@ -233,28 +224,28 @@ def generate_signal(df, strat, params):
     return 0
 
 # ============================================================
-# DATA (uses corrected GATE_HOST)
+# DATA
 # ============================================================
-def fetch_gate_candles(contract, settle, timeframe, limit=200):
-    url = f"{GATE_HOST}/futures/{settle}/candlesticks"
+def fetch_gate_candles(contract, timeframe, limit=200):
+    url = f"{GATE_HOST}/futures/usdt/candlesticks"
     try:
         r = requests.get(url, params={
             "contract": contract, "interval": timeframe, "limit": limit,
         }, timeout=15)
-        if r.status_code != 200:
-            return None
+        if r.status_code != 200: return None
         data = r.json()
-        if not data or len(data) < 50:
-            return None
+        if not data or len(data) < 50: return None
+        
         df = pd.DataFrame(data)
         df["t"] = pd.to_datetime(df["t"].astype(int), unit="s", utc=True)
         df = df.set_index("t").sort_index()
         for col in ["o", "h", "l", "c", "v"]:
             df[col] = df[col].astype(float)
-        df.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"}, inplace=True)
+            
+        # ✅ Fix Pandas Warning: No inplace=True
+        df = df.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"})
         return df
     except Exception as e:
-        print(f"  ⚠️ fetch error {contract}: {e}")
         return None
 
 # ============================================================
@@ -262,33 +253,33 @@ def fetch_gate_candles(contract, settle, timeframe, limit=200):
 # ============================================================
 def resolve_contract(symbol):
     base, quote = symbol.split("/")
-    preferred = f"{base}_{quote}"
-
-    if quote.lower() in ("usdt", "usdc"):
-        for c in get_contracts(quote.lower()):
-            if c.name == preferred:
-                return preferred, quote.lower()
-
+    
+    # اگر ارز به USDT ختم می‌شود، همان را چک کن
+    if quote == "USDT":
+        for c in get_contracts():
+            if c.name == f"{base}_USDT":
+                return f"{base}_USDT"
+                
+    # برای بقیه (USDC, USD, BTC) هم تلاش کن معادل USDT آن را پیدا کنی
     alt = f"{base}_USDT"
-    for settle in ("usdt", "usdc"):
-        for c in get_contracts(settle):
-            if c.name == alt:
-                return alt, settle
+    for c in get_contracts():
+        if c.name == alt:
+            return alt
 
-    return None, None
+    return None
 
 # ============================================================
 # ACCOUNT / POSITION
 # ============================================================
-def get_equity(settle):
+def get_equity():
     try:
-        return float(futures_api.list_futures_accounts(settle).total)
+        return float(futures_api.list_futures_accounts("usdt").total)
     except Exception:
         return 0.0
 
-def get_position_size(contract, settle):
+def get_position_size(contract):
     try:
-        for p in futures_api.list_positions(settle):
+        for p in futures_api.list_positions("usdt"):
             if p.contract == contract:
                 return int(p.size)
     except Exception:
@@ -298,25 +289,25 @@ def get_position_size(contract, settle):
 # ============================================================
 # ORDERS
 # ============================================================
-def place_market_order(contract, size, settle):
+def place_market_order(contract, size):
     order = FuturesOrder(contract=contract, size=abs(size), price="0", tif="ioc", reduce_only=False)
     try:
-        futures_api.create_futures_order(settle, order)
+        futures_api.create_futures_order("usdt", order)
         print(f"  🧪 [DEMO] {'LONG' if size > 0 else 'SHORT'} {contract} size={abs(size)}")
         return True
     except Exception as e:
         print(f"  ❌ Market failed {contract}: {e}")
         return False
 
-def close_position_market(contract, current_size, settle):
+def close_position_market(contract, current_size):
     order = FuturesOrder(contract=contract, size=abs(current_size), price="0", tif="ioc", reduce_only=True)
     try:
-        futures_api.create_futures_order(settle, order)
+        futures_api.create_futures_order("usdt", order)
         print(f"  🧪 [DEMO CLOSE] {contract} size={current_size}")
     except Exception as e:
         print(f"  ❌ Close failed {contract}: {e}")
 
-def place_sl_tp_orders(contract, settle, side, size, sl_price, tp_price):
+def place_sl_tp_orders(contract, side, size, sl_price, tp_price):
     sl_rule = 2 if side == "long" else 1
     tp_rule = 1 if side == "long" else 2
 
@@ -333,7 +324,7 @@ def place_sl_tp_orders(contract, settle, side, size, sl_price, tp_price):
             order_type=f"close-{side}-order",
         )
         try:
-            futures_api.create_price_triggered_order(settle, order)
+            futures_api.create_price_triggered_order("usdt", order)
             print(f"  🧪 [DEMO {kind}] {contract} @ {price:.6f}")
         except Exception as e:
             print(f"  ⚠️ {kind} failed {contract}: {e}")
@@ -347,16 +338,16 @@ def process_config(cfg):
     strat  = cfg["strategy"]
     params = cfg["params"]
 
-    contract, settle = resolve_contract(symbol)
+    contract = resolve_contract(symbol)
     if contract is None:
         print(f"  ⚠️ {symbol}: no contract on Gate.io TestNet")
         return
 
-    df = fetch_gate_candles(contract, settle, tf, limit=200)
+    df = fetch_gate_candles(contract, tf, limit=200)
     if df is None or len(df) < 50:
         return
 
-    current_pos = get_position_size(contract, settle)
+    current_pos = get_position_size(contract)
     signal = generate_signal(df, strat, params)
 
     if signal != 0 and current_pos == 0:
@@ -365,14 +356,13 @@ def process_config(cfg):
         if atr_val <= 0 or price <= 0:
             return
 
-        specs = get_contract_specs(contract, settle)
+        specs = get_contract_specs(contract)
         multiplier = specs["quanto_multiplier"]
         sl_dist = atr_val * ATR_MULT_SL
         tp_dist = sl_dist * ATR_MULT_TP
 
-        equity = _equity_cache.get(settle, 0.0)
+        equity = _equity_cache.get("usdt", 0.0)
         if equity <= 0:
-            print(f"  ⚠️ {symbol}: equity {settle}=0, skip")
             return
 
         risk_amount = equity * RISK_PCT
@@ -383,19 +373,17 @@ def process_config(cfg):
 
         if signal == 1:
             print(f"  📈 LONG {symbol} {tf} {strat} size={size}")
-            if place_market_order(contract, size, settle):
-                place_sl_tp_orders(contract, settle, "long", size,
-                                   price - sl_dist, price + tp_dist)
+            if place_market_order(contract, size):
+                place_sl_tp_orders(contract, "long", size, price - sl_dist, price + tp_dist)
         elif signal == -1:
             print(f"  📉 SHORT {symbol} {tf} {strat} size={size}")
-            if place_market_order(contract, -size, settle):
-                place_sl_tp_orders(contract, settle, "short", size,
-                                   price + sl_dist, price - tp_dist)
+            if place_market_order(contract, -size):
+                place_sl_tp_orders(contract, "short", size, price + sl_dist, price - tp_dist)
 
     elif current_pos != 0:
         if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
             print(f"  🔄 Reverse {symbol}, closing")
-            close_position_market(contract, current_pos, settle)
+            close_position_market(contract, current_pos)
 
 # ============================================================
 # MAIN
@@ -413,15 +401,10 @@ def main():
         print(f"\n✅ Connected. USDT equity: {float(acc.total):.2f}\n")
     except Exception as e:
         print(f"❌ Connection failed: {e}")
-        print("   → Verify that your API key is for TestNet (Unified Account)")
-        print("   → Host must be https://api-testnet.gateapi.io/api/v4")
         sys.exit(1)
 
-    for settle in ("usdt", "usdc"):
-        eq = get_equity(settle)
-        if eq > 0:
-            _equity_cache[settle] = eq
-            print(f"💰 {settle.upper()} equity: {eq:.2f}")
+    _equity_cache["usdt"] = get_equity()
+    print(f"💰 USDT equity: {_equity_cache['usdt']:.2f}")
 
     print(f"\n🚀 Processing {len(BEST_CONFIGS)} configs...\n")
 
