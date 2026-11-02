@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Full Symbol List
-====================================================
-- ALL 30 original optimized configs kept (USDC, USDT, BTC, USD)
-- PLUS 23 extra popular symbols user requested
-- Hardcoded TestNet keys (safe — demo only, no real money)
-- Single-shot for GitHub Actions
+Gate.io Futures TestNet Scanner — Full Symbol List (Corrected Host)
+====================================================================
+- Uses official TestNet endpoint: https://api-testnet.gateapi.io/api/v4
+- 53 pre-optimized configs (30 original + 23 extra)
+- Single-shot execution for GitHub Actions
+- Hardcoded TestNet keys (demo only — no real money)
 """
 
 import os
 import sys
+import json
 import requests
 import numpy as np
 import pandas as pd
@@ -23,18 +24,20 @@ from gate_api.models import FuturesOrder, FuturesPriceTriggeredOrder, FuturesIni
 # ============================================================
 API_KEY    = "b37ed23f61f92662e11ba8b247adfb3b"
 API_SECRET = "39395a011e7d170e4b955c3060692ed5bfe3f380cd470717dbbc516b03a73fea"
-GATE_HOST  = "https://fx-api-testnet.gateio.ws/api/v4"
 
-# 🛡️ hard safety check
-if "testnet" not in GATE_HOST:
-    print("❌ FATAL: non-TestNet host. Aborting.")
+# ✅ CORRECTED: Official TestNet host for Unified/Futures accounts
+GATE_HOST  = "https://api-testnet.gateapi.io/api/v4"
+
+# Safety: refuse non-TestNet hosts
+if "testnet" not in GATE_HOST.lower():
+    print("❌ FATAL: non-TestNet host detected. Aborting.")
     sys.exit(99)
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════════╗
 ║   🧪  GATE.IO FUTURES — TESTNET (DEMO)                               ║
 ║   ✅  VIRTUAL FUNDS ONLY — NO REAL MONEY                             ║
-║   🌐  https://fx-api-testnet.gateio.ws/api/v4                        ║
+║   🌐  https://api-testnet.gateapi.io/api/v4                          ║
 ╚══════════════════════════════════════════════════════════════════════╝
 """
 print(BANNER)
@@ -84,7 +87,7 @@ BEST_CONFIGS = [
     {"symbol": "BTC/USDC",  "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
     {"symbol": "AVAX/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
 
-    # ===== 23 EXTRA POPULAR SYMBOLS (user-requested) =====
+    # ===== 23 EXTRA POPULAR SYMBOLS =====
     {"symbol": "SHIB/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
     {"symbol": "PEPE/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
     {"symbol": "DOGE/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
@@ -113,7 +116,8 @@ BEST_CONFIGS = [
 # ============================================================
 # CLIENT
 # ============================================================
-futures_api = FuturesApi(ApiClient(Configuration(key=API_KEY, secret=API_SECRET, host=GATE_HOST)))
+config = Configuration(key=API_KEY, secret=API_SECRET, host=GATE_HOST)
+futures_api = FuturesApi(ApiClient(config))
 
 # caches
 _contracts_cache: dict = {}
@@ -229,7 +233,7 @@ def generate_signal(df, strat, params):
     return 0
 
 # ============================================================
-# DATA
+# DATA (uses corrected GATE_HOST)
 # ============================================================
 def fetch_gate_candles(contract, settle, timeframe, limit=200):
     url = f"{GATE_HOST}/futures/{settle}/candlesticks"
@@ -254,19 +258,17 @@ def fetch_gate_candles(contract, settle, timeframe, limit=200):
         return None
 
 # ============================================================
-# CONTRACT RESOLUTION (handles USD, USDC, BTC, USDT with fallback)
+# CONTRACT RESOLUTION
 # ============================================================
 def resolve_contract(symbol):
     base, quote = symbol.split("/")
     preferred = f"{base}_{quote}"
 
-    # Try the exact quote first if it's a valid settle
     if quote.lower() in ("usdt", "usdc"):
         for c in get_contracts(quote.lower()):
             if c.name == preferred:
                 return preferred, quote.lower()
 
-    # Fallback: try USDT then USDC (covers USD, BTC, and any other quote)
     alt = f"{base}_USDT"
     for settle in ("usdt", "usdc"):
         for c in get_contracts(settle):
@@ -276,7 +278,7 @@ def resolve_contract(symbol):
     return None, None
 
 # ============================================================
-# ACCOUNT
+# ACCOUNT / POSITION
 # ============================================================
 def get_equity(settle):
     try:
@@ -337,7 +339,7 @@ def place_sl_tp_orders(contract, settle, side, size, sl_price, tp_price):
             print(f"  ⚠️ {kind} failed {contract}: {e}")
 
 # ============================================================
-# TRADING
+# TRADING LOGIC
 # ============================================================
 def process_config(cfg):
     symbol = cfg["symbol"]
@@ -411,6 +413,8 @@ def main():
         print(f"\n✅ Connected. USDT equity: {float(acc.total):.2f}\n")
     except Exception as e:
         print(f"❌ Connection failed: {e}")
+        print("   → Verify that your API key is for TestNet (Unified Account)")
+        print("   → Host must be https://api-testnet.gateapi.io/api/v4")
         sys.exit(1)
 
     for settle in ("usdt", "usdc"):
