@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Final Clean Version
+Gate.io Futures TestNet Scanner — Final Fixed Version
 ======================================================
-- Supports USDT only (fixes USDC 400 error on TestNet)
-- 53 pre-optimized configs
-- Single-shot execution
-- Clean pandas syntax
+- Fixes SL/TP errors: initial.size=0, initial.close=True
+- Rounds trigger prices to contract tick size
+- USDT only (no USDC calls)
+- 53 configs, single-shot for GitHub Actions
 """
 
 import os
@@ -49,7 +49,6 @@ MAX_CONTRACTS = 1_000_000
 # CONFIGS (53 TOTAL)
 # ============================================================
 BEST_CONFIGS = [
-    # 30 Original
     {"symbol": "BCH/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
     {"symbol": "AVAX/USDC", "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 20}},
     {"symbol": "DOT/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
@@ -80,8 +79,6 @@ BEST_CONFIGS = [
     {"symbol": "AAVE/USDT", "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
     {"symbol": "BTC/USDC",  "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
     {"symbol": "AVAX/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-
-    # 23 Extra
     {"symbol": "SHIB/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
     {"symbol": "PEPE/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
     {"symbol": "DOGE/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
@@ -108,7 +105,7 @@ BEST_CONFIGS = [
 ]
 
 # ============================================================
-# CLIENT (USDT ONLY — Fixes USDC error)
+# CLIENT (USDT ONLY)
 # ============================================================
 config = Configuration(key=API_KEY, secret=API_SECRET, host=GATE_HOST)
 futures_api = FuturesApi(ApiClient(config))
@@ -118,7 +115,6 @@ _specs_cache:     dict = {}
 _equity_cache:    dict = {}
 
 def get_contracts():
-    """Fetch USDT contracts only."""
     if "usdt" not in _contracts_cache:
         try:
             _contracts_cache["usdt"] = futures_api.list_futures_contracts("usdt")
@@ -136,10 +132,14 @@ def get_contract_specs(contract):
                 "quanto_multiplier": float(c.quanto_multiplier),
                 "order_size_min": int(c.order_size_min),
                 "order_size_max": int(c.order_size_max),
+                "order_price_round": float(c.order_price_round) if hasattr(c, "order_price_round") else 0.0001,
             }
             _specs_cache[contract] = spec
             return spec
-    return {"quanto_multiplier": 1.0, "order_size_min": 1, "order_size_max": MAX_CONTRACTS}
+    return {"quanto_multiplier": 1.0, "order_size_min": 1, "order_size_max": MAX_CONTRACTS, "order_price_round": 0.0001}
+
+def round_to_tick(price, tick_size):
+    return round(price / tick_size) * tick_size
 
 # ============================================================
 # INDICATORS
@@ -229,43 +229,29 @@ def generate_signal(df, strat, params):
 def fetch_gate_candles(contract, timeframe, limit=200):
     url = f"{GATE_HOST}/futures/usdt/candlesticks"
     try:
-        r = requests.get(url, params={
-            "contract": contract, "interval": timeframe, "limit": limit,
-        }, timeout=15)
+        r = requests.get(url, params={"contract": contract, "interval": timeframe, "limit": limit}, timeout=15)
         if r.status_code != 200: return None
         data = r.json()
         if not data or len(data) < 50: return None
-        
         df = pd.DataFrame(data)
         df["t"] = pd.to_datetime(df["t"].astype(int), unit="s", utc=True)
         df = df.set_index("t").sort_index()
         for col in ["o", "h", "l", "c", "v"]:
             df[col] = df[col].astype(float)
-            
-        # ✅ Fix Pandas Warning: No inplace=True
         df = df.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"})
         return df
-    except Exception as e:
+    except Exception:
         return None
 
 # ============================================================
 # CONTRACT RESOLUTION
 # ============================================================
 def resolve_contract(symbol):
-    base, quote = symbol.split("/")
-    
-    # اگر ارز به USDT ختم می‌شود، همان را چک کن
-    if quote == "USDT":
-        for c in get_contracts():
-            if c.name == f"{base}_USDT":
-                return f"{base}_USDT"
-                
-    # برای بقیه (USDC, USD, BTC) هم تلاش کن معادل USDT آن را پیدا کنی
+    base = symbol.split("/")[0]
     alt = f"{base}_USDT"
     for c in get_contracts():
         if c.name == alt:
             return alt
-
     return None
 
 # ============================================================
@@ -307,25 +293,37 @@ def close_position_market(contract, current_size):
     except Exception as e:
         print(f"  ❌ Close failed {contract}: {e}")
 
-def place_sl_tp_orders(contract, side, size, sl_price, tp_price):
+def place_sl_tp_orders(contract, side, sl_price, tp_price):
+    specs = get_contract_specs(contract)
+    tick = specs["order_price_round"]
+    sl_price = round_to_tick(sl_price, tick)
+    tp_price = round_to_tick(tp_price, tick)
+
     sl_rule = 2 if side == "long" else 1
     tp_rule = 1 if side == "long" else 2
 
     for kind, price, rule in [("SL", sl_price, sl_rule), ("TP", tp_price, tp_rule)]:
         order = FuturesPriceTriggeredOrder(
             initial=FuturesInitialOrder(
-                contract=contract, size=size, price="0",
-                tif="ioc", reduce_only=True, close=True,
+                contract=contract,
+                size=0,
+                price="0",
+                tif="ioc",
+                reduce_only=True,
+                close=True,
             ),
             trigger=FuturesPriceTrigger(
-                strategy_type=0, price_type=0,
-                price=str(price), rule=rule, expiration=86400,
+                strategy_type=0,
+                price_type=0,
+                price=str(price),
+                rule=rule,
+                expiration=86400,
             ),
             order_type=f"close-{side}-order",
         )
         try:
             futures_api.create_price_triggered_order("usdt", order)
-            print(f"  🧪 [DEMO {kind}] {contract} @ {price:.6f}")
+            print(f"  🧪 [DEMO {kind}] {contract} @ {price:.8f}")
         except Exception as e:
             print(f"  ⚠️ {kind} failed {contract}: {e}")
 
@@ -374,11 +372,11 @@ def process_config(cfg):
         if signal == 1:
             print(f"  📈 LONG {symbol} {tf} {strat} size={size}")
             if place_market_order(contract, size):
-                place_sl_tp_orders(contract, "long", size, price - sl_dist, price + tp_dist)
+                place_sl_tp_orders(contract, "long", price - sl_dist, price + tp_dist)
         elif signal == -1:
             print(f"  📉 SHORT {symbol} {tf} {strat} size={size}")
             if place_market_order(contract, -size):
-                place_sl_tp_orders(contract, "short", size, price + sl_dist, price - tp_dist)
+                place_sl_tp_orders(contract, "short", price + sl_dist, price - tp_dist)
 
     elif current_pos != 0:
         if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
