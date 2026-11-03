@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — State-Aware Version
-======================================================
-- Fixes strategy interference (uses state.json to track owner)
-- Fixes AUTO_INVALID_PARAM_CLOSE
-- Fixes MARKET_ORDER_SIZE_TOO_LARGE
+Gate.io Futures TestNet Scanner — Unlimited Positions + Duration Report
+========================================================================
+- No limit on max open positions
+- Sends a detailed report of all open positions with live PnL and open duration
+- Fixes AUTO_INVALID_PARAM_CLOSE, MARKET_ORDER_SIZE_TOO_LARGE
 - Telegram notifications enabled
 """
 
@@ -59,11 +59,11 @@ print(BANNER)
 # ============================================================
 # PARAMETERS
 # ============================================================
-RISK_PCT      = 0.02
-ATR_MULT_SL   = 2.5
-ATR_MULT_TP   = 2.5
-MAX_CONTRACTS = 90_000   # ✅ سقف مجاز بازار
-STATE_FILE    = "state.json"  # ✅ فایل حافظه برای جلوگیری از تداخل استراتژی‌ها
+RISK_PCT          = 0.02
+ATR_MULT_SL       = 2.5
+ATR_MULT_TP       = 2.5
+MAX_CONTRACTS     = 90_000
+# محدودیت تعداد پوزیشن برداشته شد (No MAX_OPEN_POSITIONS)
 
 # ============================================================
 # CONFIGS (53 TOTAL)
@@ -125,7 +125,7 @@ BEST_CONFIGS = [
 ]
 
 # ============================================================
-# CLIENT & STATE
+# CLIENT
 # ============================================================
 config = Configuration(key=API_KEY, secret=API_SECRET, host=GATE_HOST)
 futures_api = FuturesApi(ApiClient(config))
@@ -133,22 +133,6 @@ futures_api = FuturesApi(ApiClient(config))
 _contracts_cache: dict = {}
 _specs_cache:     dict = {}
 _equity_cache:    dict = {}
-
-def load_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-def save_state(state):
-    try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f, indent=2)
-    except Exception as e:
-        print(f"  ⚠️ Failed to save state: {e}")
 
 def get_contracts():
     if "usdt" not in _contracts_cache:
@@ -375,6 +359,61 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
             print(f"  ⚠️ {kind} failed {contract}: {e}")
 
 # ============================================================
+# POSITION REPORT (WITH DURATION)
+# ============================================================
+def send_positions_report():
+    """گزارش وضعیت پوزیشن‌های باز همراه با سود/ضرر و مدت زمان باز بودن"""
+    try:
+        positions = futures_api.list_positions("usdt")
+    except Exception as e:
+        print(f"  [POSITIONS] error: {e}")
+        return
+
+    active = [p for p in positions if int(p.size) != 0]
+    if not active:
+        send_telegram("📭 <b>No open positions</b>")
+        return
+
+    now = datetime.now(timezone.utc).timestamp()
+    total_pnl = 0.0
+    lines = [f"📊 <b>Open Positions ({len(active)})</b>\n"]
+
+    for p in active:
+        size = int(p.size)
+        side = "LONG" if size > 0 else "SHORT"
+        emoji = "🟢" if side == "LONG" else "🔴"
+        entry = float(p.entry_price)
+        mark = float(p.mark_price)
+        pnl = float(p.unrealised_pnl)
+        total_pnl += pnl
+        pnl_emoji = "✅" if pnl >= 0 else "❌"
+
+        # محاسبه مدت زمان باز بودن معامله
+        open_time = int(p.open_time) if hasattr(p, "open_time") and p.open_time else None
+        if open_time:
+            diff_seconds = now - open_time
+            hours = int(diff_seconds // 3600)
+            minutes = int((diff_seconds % 3600) // 60)
+            duration_str = f"{hours}h {minutes}m"
+        else:
+            duration_str = "N/A"
+
+        if side == "LONG":
+            pct = (mark - entry) / entry * 100 if entry else 0
+        else:
+            pct = (entry - mark) / entry * 100 if entry else 0
+
+        lines.append(
+            f"{emoji} <b>{p.contract}</b> {side} | Size: {abs(size)}\n"
+            f"   ⏱ Open: {duration_str} ago\n"
+            f"   Entry: {entry:.6f} | Mark: {mark:.6f}\n"
+            f"   PnL: {pnl_emoji} {pnl:+.4f} USDT ({pct:+.2f}%)\n"
+        )
+
+    lines.append(f"\n💰 <b>Total Unrealized PnL: {total_pnl:+.4f} USDT</b>")
+    send_telegram("\n".join(lines))
+
+# ============================================================
 # TRADING LOGIC
 # ============================================================
 def process_config(cfg):
@@ -391,23 +430,11 @@ def process_config(cfg):
     if df is None or len(df) < 50:
         return
 
-    state = load_state()
     current_pos = get_position_size(contract)
     signal = generate_signal(df, strat, params)
-    my_key = f"{symbol}|{tf}|{strat}"
 
-    # ✅ اگر پوزیشن بسته شده، حافظه را پاک کن
-    if current_pos == 0:
-        if contract in state:
-            del state[contract]
-            save_state(state)
-    else:
-        # ✅ اگر پوزیشن باز است، چک کن آیا صاحبش این استراتژی است یا نه
-        owner = state.get(contract)
-        if owner != my_key:
-            return  # استراتژی دیگری صاحب این پوزیشن است، دست نزن
+    # محدودیت برداشته شد، بدون چک کردن MAX_OPEN_POSITIONS
 
-    # --- ورود ---
     if signal != 0 and current_pos == 0:
         atr_val = atr(df, 14).iloc[-1]
         price = df["close"].iloc[-1]
@@ -459,23 +486,15 @@ def process_config(cfg):
 
         if side == "long":
             if place_market_order(contract, size):
-                state[contract] = my_key
-                save_state(state)
                 place_sl_tp_orders(contract, "long", price - sl_dist, price + tp_dist, price, size)
         else:
             if place_market_order(contract, -size):
-                state[contract] = my_key
-                save_state(state)
                 place_sl_tp_orders(contract, "short", price + sl_dist, price - tp_dist, price, size)
 
-    # --- خروج ---
     elif current_pos != 0:
-        # چون در بلوک بالا چک کردیم که صاحبش خودمان هستیم، حالا می‌توانیم خارج شویم
         if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
             print(f"  🔄 Reverse {symbol}, closing")
             close_position_market(contract, current_pos)
-            del state[contract]
-            save_state(state)
             side_label = "LONG" if current_pos > 0 else "SHORT"
             send_telegram(
                 f"🚪 <b>CLOSED</b> {side_label} {symbol} <code>{tf}</code>\n"
@@ -513,6 +532,9 @@ def main():
         f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
     )
 
+    # ✅ ارسال گزارش پوزیشن‌های باز در ابتدای هر اجرا
+    send_positions_report()
+
     print(f"\n🚀 Processing {len(BEST_CONFIGS)} configs...\n")
 
     for cfg in BEST_CONFIGS:
@@ -520,6 +542,9 @@ def main():
             process_config(cfg)
         except Exception as e:
             print(f"  ❌ {cfg['symbol']} {cfg['timeframe']}: {e}")
+
+    # ✅ ارسال گزارش نهایی بعد از پردازش (برای دیدن تغییرات احتمالی)
+    send_positions_report()
 
     print(f"\n✅ Run complete — TESTNET (no real money touched)")
 
