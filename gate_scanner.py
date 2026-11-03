@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Final Production Build
-=========================================================
-- Fixes AUTO_INVALID_PARAM_CLOSE (removed auto_size from price-triggered orders)
-- Fixes MARKET_ORDER_SIZE_TOO_LARGE (Hard Cap: 90,000 contracts)
-- Fixes INCREASE_POSITION on close (size=0, close=true)
-- Fixes Trigger Price scientific notation errors
+Gate.io Futures TestNet Scanner — State-Aware Version
+======================================================
+- Fixes strategy interference (uses state.json to track owner)
+- Fixes AUTO_INVALID_PARAM_CLOSE
+- Fixes MARKET_ORDER_SIZE_TOO_LARGE
 - Telegram notifications enabled
 """
 
 import os
 import sys
+import json
 import requests
 import numpy as np
 import pandas as pd
@@ -62,7 +62,8 @@ print(BANNER)
 RISK_PCT      = 0.02
 ATR_MULT_SL   = 2.5
 ATR_MULT_TP   = 2.5
-MAX_CONTRACTS = 90_000   # ✅ سقف مجاز برای جلوگیری از خطای صرافی (محدودیت 100,000)
+MAX_CONTRACTS = 90_000   # ✅ سقف مجاز بازار
+STATE_FILE    = "state.json"  # ✅ فایل حافظه برای جلوگیری از تداخل استراتژی‌ها
 
 # ============================================================
 # CONFIGS (53 TOTAL)
@@ -124,7 +125,7 @@ BEST_CONFIGS = [
 ]
 
 # ============================================================
-# CLIENT
+# CLIENT & STATE
 # ============================================================
 config = Configuration(key=API_KEY, secret=API_SECRET, host=GATE_HOST)
 futures_api = FuturesApi(ApiClient(config))
@@ -132,6 +133,22 @@ futures_api = FuturesApi(ApiClient(config))
 _contracts_cache: dict = {}
 _specs_cache:     dict = {}
 _equity_cache:    dict = {}
+
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f"  ⚠️ Failed to save state: {e}")
 
 def get_contracts():
     if "usdt" not in _contracts_cache:
@@ -327,10 +344,8 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
     sl_rule = 2 if side == "long" else 1
     tp_rule = 1 if side == "long" else 2
 
-    # ✅ order_type صحیح برای بستن کل پوزیشن
     order_type = "close-long-position" if side == "long" else "close-short-position"
 
-    # ✅ auto_size حذف شد (برای حالت One-way Mode لازم نیست و باعث خطای AUTO_INVALID_PARAM_CLOSE می‌شد)
     for kind, price_str, rule in [
         ("SL", sl_price_str, sl_rule),
         ("TP", tp_price_str, tp_rule),
@@ -338,12 +353,11 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
         order = FuturesPriceTriggeredOrder(
             initial=FuturesInitialOrder(
                 contract=contract,
-                size=0,              # 0 = بستن کل پوزیشن
-                price="0",           # بازار
+                size=0,
+                price="0",
                 tif="ioc",
                 reduce_only=True,
-                close=True,          # ✅ برای One-way Mode
-                # auto_size حذف شد
+                close=True,
             ),
             trigger=FuturesPriceTrigger(
                 strategy_type=0,
@@ -377,9 +391,23 @@ def process_config(cfg):
     if df is None or len(df) < 50:
         return
 
+    state = load_state()
     current_pos = get_position_size(contract)
     signal = generate_signal(df, strat, params)
+    my_key = f"{symbol}|{tf}|{strat}"
 
+    # ✅ اگر پوزیشن بسته شده، حافظه را پاک کن
+    if current_pos == 0:
+        if contract in state:
+            del state[contract]
+            save_state(state)
+    else:
+        # ✅ اگر پوزیشن باز است، چک کن آیا صاحبش این استراتژی است یا نه
+        owner = state.get(contract)
+        if owner != my_key:
+            return  # استراتژی دیگری صاحب این پوزیشن است، دست نزن
+
+    # --- ورود ---
     if signal != 0 and current_pos == 0:
         atr_val = atr(df, 14).iloc[-1]
         price = df["close"].iloc[-1]
@@ -398,7 +426,6 @@ def process_config(cfg):
         risk_amount = equity * RISK_PCT
         raw_size = int(risk_amount / (multiplier * sl_dist))
 
-        # ✅ اعمال سقف قرارداد و سقف مطلق بازار (90,000)
         order_size_max = specs["order_size_max"]
         size = max(specs["order_size_min"], min(raw_size, order_size_max, MAX_CONTRACTS))
 
@@ -432,15 +459,23 @@ def process_config(cfg):
 
         if side == "long":
             if place_market_order(contract, size):
+                state[contract] = my_key
+                save_state(state)
                 place_sl_tp_orders(contract, "long", price - sl_dist, price + tp_dist, price, size)
         else:
             if place_market_order(contract, -size):
+                state[contract] = my_key
+                save_state(state)
                 place_sl_tp_orders(contract, "short", price + sl_dist, price - tp_dist, price, size)
 
+    # --- خروج ---
     elif current_pos != 0:
+        # چون در بلوک بالا چک کردیم که صاحبش خودمان هستیم، حالا می‌توانیم خارج شویم
         if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
             print(f"  🔄 Reverse {symbol}, closing")
             close_position_market(contract, current_pos)
+            del state[contract]
+            save_state(state)
             side_label = "LONG" if current_pos > 0 else "SHORT"
             send_telegram(
                 f"🚪 <b>CLOSED</b> {side_label} {symbol} <code>{tf}</code>\n"
