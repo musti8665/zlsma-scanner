@@ -52,10 +52,9 @@ jobs:
           PYTHONUNBUFFERED: 1
         run: python gate_scanner.py
 
-      # ✅ این بخش بسیار مهم است: ذخیره حافظه (state) و لاگ‌ها بعد از هر اجرا
-      - name: Commit state and logs
+      - name: Commit state
         if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🧪 chore(testnet): update state and logs [skip ci]"
-          file_pattern: "state.json gate_scanner_log.jsonl"
+          commit_message: "🧪 chore(testnet): update state [skip ci]"
+          file_pattern: "state.json"
