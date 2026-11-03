@@ -3,6 +3,7 @@
 """
 Gate.io Futures TestNet Scanner — Final Production Build
 =========================================================
+- Fixes AUTO_INVALID_PARAM_CLOSE (removed auto_size from price-triggered orders)
 - Fixes MARKET_ORDER_SIZE_TOO_LARGE (Hard Cap: 90,000 contracts)
 - Fixes INCREASE_POSITION on close (size=0, close=true)
 - Fixes Trigger Price scientific notation errors
@@ -300,11 +301,11 @@ def place_market_order(contract, size):
 def close_position_market(contract, current_size):
     order = FuturesOrder(
         contract=contract,
-        size=0,                # MUST be 0 for full close
-        price="0",             # market order
+        size=0,
+        price="0",
         tif="ioc",
-        reduce_only=True,      
-        close=True,            # tells exchange to close the position
+        reduce_only=True,
+        close=True,
     )
     try:
         futures_api.create_futures_order("usdt", order)
@@ -326,9 +327,10 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
     sl_rule = 2 if side == "long" else 1
     tp_rule = 1 if side == "long" else 2
 
+    # ✅ order_type صحیح برای بستن کل پوزیشن
     order_type = "close-long-position" if side == "long" else "close-short-position"
-    auto_size = "close_long" if side == "long" else "close_short"
 
+    # ✅ auto_size حذف شد (برای حالت One-way Mode لازم نیست و باعث خطای AUTO_INVALID_PARAM_CLOSE می‌شد)
     for kind, price_str, rule in [
         ("SL", sl_price_str, sl_rule),
         ("TP", tp_price_str, tp_rule),
@@ -336,12 +338,12 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
         order = FuturesPriceTriggeredOrder(
             initial=FuturesInitialOrder(
                 contract=contract,
-                size=0,
-                price="0",
+                size=0,              # 0 = بستن کل پوزیشن
+                price="0",           # بازار
                 tif="ioc",
                 reduce_only=True,
-                close=True,
-                auto_size=auto_size,
+                close=True,          # ✅ برای One-way Mode
+                # auto_size حذف شد
             ),
             trigger=FuturesPriceTrigger(
                 strategy_type=0,
@@ -403,7 +405,7 @@ def process_config(cfg):
         if raw_size > size:
             print(f"  ⚠️ {symbol}: requested {raw_size} capped to {size}")
             send_telegram(f"⚠️ <b>{symbol}</b>: requested {raw_size} capped to {size}")
-            
+
         if size <= 0:
             return
 
