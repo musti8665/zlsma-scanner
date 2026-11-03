@@ -30,7 +30,7 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install gate-api pandas numpy requests
 
       - name: 🛡️ Assert TestNet
         run: |
@@ -44,9 +44,18 @@ jobs:
           ls -la
           test -f gate_scanner.py || (echo "❌ gate_scanner.py missing" && exit 1)
           test -f requirements.txt || (echo "❌ requirements.txt missing" && exit 1)
+          test -f state.json || (echo "❌ state.json missing" && exit 1)
           echo "✅ All files present"
 
       - name: Run scanner
         env:
           PYTHONUNBUFFERED: 1
         run: python gate_scanner.py
+
+      # ✅ این بخش بسیار مهم است: ذخیره حافظه (state) و لاگ‌ها بعد از هر اجرا
+      - name: Commit state and logs
+        if: always()
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "🧪 chore(testnet): update state and logs [skip ci]"
+          file_pattern: "state.json gate_scanner_log.jsonl"
