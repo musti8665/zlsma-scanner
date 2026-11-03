@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner + Telegram Notifications
-=========================================================
+Gate.io Futures TestNet Scanner — Final Fixed (SL/TP + Telegram)
+==================================================================
+- Fixed order_type: close-long-position / close-short-position
+- Fixed trigger.price: fixed-decimal string format (no scientific notation)
+- Added auto_size for Hedge Mode compatibility
+- USDT only, 53 configs, single-shot for GitHub Actions
 """
 
 import os
@@ -22,13 +26,12 @@ API_SECRET = "39395a011e7d170e4b955c3060692ed5bfe3f380cd470717dbbc516b03a73fea"
 GATE_HOST  = "https://api-testnet.gateapi.io/api/v4"
 
 # ============================================================
-# 📱 TELEGRAM CONFIG (اضافه شد)
+# 📱 TELEGRAM CONFIG
 # ============================================================
 TG_TOKEN   = "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo"
 TG_CHAT_ID = "254500349"
 
 def send_telegram(text: str):
-    """ارسال پیام به تلگرام — در صورت خطا، اجرای اصلی متوقف نمی‌شود."""
     if not TG_TOKEN or not TG_CHAT_ID:
         return
     try:
@@ -318,24 +321,46 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
     sl_price = round_to_tick(sl_price, tick)
     tp_price = round_to_tick(tp_price, tick)
 
+    # ✅ فرمت‌دهی قیمت برای جلوگیری از نماد علمی (مشکل SHIB و ارزهای بسیار کوچک)
+    price_decimals = 10
+    sl_price_str = f"{sl_price:.{price_decimals}f}"
+    tp_price_str = f"{tp_price:.{price_decimals}f}"
+
     sl_rule = 2 if side == "long" else 1
     tp_rule = 1 if side == "long" else 2
 
-    for kind, price, rule in [("SL", sl_price, sl_rule), ("TP", tp_price, tp_rule)]:
+    # ✅ order_type صحیح برای بستن کل پوزیشن
+    order_type = "close-long-position" if side == "long" else "close-short-position"
+
+    # ✅ auto_size برای سازگاری با حالت Hedge Mode
+    auto_size = "close_long" if side == "long" else "close_short"
+
+    for kind, price_str, rule in [
+        ("SL", sl_price_str, sl_rule),
+        ("TP", tp_price_str, tp_rule),
+    ]:
         order = FuturesPriceTriggeredOrder(
             initial=FuturesInitialOrder(
-                contract=contract, size=0, price="0",
-                tif="ioc", reduce_only=True, close=True,
+                contract=contract,
+                size=0,              # ✅ 0 = بستن کل پوزیشن
+                price="0",           # ✅ بازار
+                tif="ioc",
+                reduce_only=True,
+                close=True,
+                auto_size=auto_size, # ✅ برای Hedge Mode
             ),
             trigger=FuturesPriceTrigger(
-                strategy_type=0, price_type=0,
-                price=str(price), rule=rule, expiration=86400,
+                strategy_type=0,
+                price_type=0,
+                price=price_str,     # ✅ رشته با دقت کافی
+                rule=rule,
+                expiration=86400,
             ),
-            order_type=f"close-{side}-order",
+            order_type=order_type,   # ✅ close-long-position / close-short-position
         )
         try:
             futures_api.create_price_triggered_order("usdt", order)
-            print(f"  🧪 [DEMO {kind}] {contract} @ {price:.8f}")
+            print(f"  🧪 [DEMO {kind}] {contract} @ {price_str}")
         except Exception as e:
             print(f"  ⚠️ {kind} failed {contract}: {e}")
 
@@ -391,8 +416,7 @@ def process_config(cfg):
             label = "SHORT"
             print(f"  📉 SHORT {symbol} {tf} {strat} size={size}")
 
-        # ارسال به تلگرام
-        msg = (
+        send_telegram(
             f"{emoji} <b>{label}</b> {symbol} <code>{tf}</code>\n"
             f"🎯 Strategy: <b>{strat}</b>\n"
             f"💰 Entry: <code>{price:.6f}</code>\n"
@@ -401,7 +425,6 @@ def process_config(cfg):
             f"🎯 TP: <code>{price + tp_dist if side == 'long' else price - tp_dist:.6f}</code>\n"
             f"🧪 <i>TESTNET — NO REAL MONEY</i>"
         )
-        send_telegram(msg)
 
         if side == "long":
             if place_market_order(contract, size):
@@ -444,7 +467,6 @@ def main():
 
     _equity_cache["usdt"] = equity
 
-    # پیام شروع به تلگرام
     send_telegram(
         f"🧪 <b>Gate.io TestNet Scanner — Run Started</b>\n"
         f"💰 Equity: <code>${equity:.2f} USDT</code>\n"
