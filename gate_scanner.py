@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Fixed Position Closing & Order Size Limits
-=============================================================================
-- Closes positions with size=0 & close=true (fixes INCREASE_POSITION)
-- Caps order size at contract's order_size_max (fixes MARKET_ORDER_SIZE_TOO_LARGE)
-- Sends Telegram notifications on entries, exits, and errors
+Gate.io Futures TestNet Scanner — Final Production Build
+=========================================================
+- Fixes MARKET_ORDER_SIZE_TOO_LARGE (Hard Cap: 90,000 contracts)
+- Fixes INCREASE_POSITION on close (size=0, close=true)
+- Fixes Trigger Price scientific notation errors
+- Telegram notifications enabled
 """
 
 import os
@@ -60,7 +61,7 @@ print(BANNER)
 RISK_PCT      = 0.02
 ATR_MULT_SL   = 2.5
 ATR_MULT_TP   = 2.5
-MAX_CONTRACTS = 1_000_000   # absolute safety cap
+MAX_CONTRACTS = 90_000   # ✅ سقف مجاز برای جلوگیری از خطای صرافی (محدودیت 100,000)
 
 # ============================================================
 # CONFIGS (53 TOTAL)
@@ -158,7 +159,7 @@ def round_to_tick(price, tick):
     return round(price / tick) * tick
 
 # ============================================================
-# INDICATORS (unchanged)
+# INDICATORS
 # ============================================================
 def atr(df, period=14):
     h, l, c = df["high"], df["low"], df["close"]
@@ -240,7 +241,7 @@ def generate_signal(df, strat, params):
     return 0
 
 # ============================================================
-# DATA
+# DATA & ACCOUNT
 # ============================================================
 def fetch_gate_candles(contract, timeframe, limit=200):
     url = f"{GATE_HOST}/futures/usdt/candlesticks"
@@ -267,9 +268,6 @@ def resolve_contract(symbol):
             return alt
     return None
 
-# ============================================================
-# ACCOUNT
-# ============================================================
 def get_equity():
     try:
         return float(futures_api.list_futures_accounts("usdt").total)
@@ -286,7 +284,7 @@ def get_position_size(contract):
     return 0
 
 # ============================================================
-# ORDERS — FIXED
+# ORDERS
 # ============================================================
 def place_market_order(contract, size):
     order = FuturesOrder(contract=contract, size=abs(size), price="0", tif="ioc", reduce_only=False)
@@ -300,17 +298,13 @@ def place_market_order(contract, size):
         return False
 
 def close_position_market(contract, current_size):
-    """
-    ✅ FIX: In One-way mode, closing a position requires size=0 and close=true.
-    Sending reduce_only=True with non-zero size causes INCREASE_POSITION error.
-    """
     order = FuturesOrder(
         contract=contract,
-        size=0,                # ✅ MUST be 0 for full close
+        size=0,                # MUST be 0 for full close
         price="0",             # market order
         tif="ioc",
-        reduce_only=True,      # ensures it only reduces
-        close=True,            # ✅ tells exchange to close the position
+        reduce_only=True,      
+        close=True,            # tells exchange to close the position
     )
     try:
         futures_api.create_futures_order("usdt", order)
@@ -365,7 +359,7 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
             print(f"  ⚠️ {kind} failed {contract}: {e}")
 
 # ============================================================
-# TRADING LOGIC — FIXED
+# TRADING LOGIC
 # ============================================================
 def process_config(cfg):
     symbol = cfg["symbol"]
@@ -402,14 +396,14 @@ def process_config(cfg):
         risk_amount = equity * RISK_PCT
         raw_size = int(risk_amount / (multiplier * sl_dist))
 
-        # ✅ FIX: Cap size at contract's max order size
+        # ✅ اعمال سقف قرارداد و سقف مطلق بازار (90,000)
         order_size_max = specs["order_size_max"]
         size = max(specs["order_size_min"], min(raw_size, order_size_max, MAX_CONTRACTS))
 
-        if raw_size > order_size_max:
-            print(f"  ⚠️ {symbol}: requested {raw_size} > max {order_size_max}, capped to {order_size_max}")
-            send_telegram(f"⚠️ <b>{symbol}</b>: requested size {raw_size} exceeds max {order_size_max}, using {order_size_max}")
-
+        if raw_size > size:
+            print(f"  ⚠️ {symbol}: requested {raw_size} capped to {size}")
+            send_telegram(f"⚠️ <b>{symbol}</b>: requested {raw_size} capped to {size}")
+            
         if size <= 0:
             return
 
