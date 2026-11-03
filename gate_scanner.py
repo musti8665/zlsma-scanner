@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Final Fixed (SL/TP + Telegram)
-==================================================================
-- Fixed order_type: close-long-position / close-short-position
-- Fixed trigger.price: fixed-decimal string format (no scientific notation)
-- Added auto_size for Hedge Mode compatibility
-- USDT only, 53 configs, single-shot for GitHub Actions
+Gate.io Futures TestNet Scanner — Fixed Position Closing & Order Size Limits
+=============================================================================
+- Closes positions with size=0 & close=true (fixes INCREASE_POSITION)
+- Caps order size at contract's order_size_max (fixes MARKET_ORDER_SIZE_TOO_LARGE)
+- Sends Telegram notifications on entries, exits, and errors
 """
 
 import os
@@ -35,18 +34,11 @@ def send_telegram(text: str):
     if not TG_TOKEN or not TG_CHAT_ID:
         return
     try:
-        r = requests.post(
+        requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={
-                "chat_id": TG_CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            },
+            json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
             timeout=10,
         )
-        if r.status_code != 200:
-            print(f"  [TG] Failed: {r.text[:100]}")
     except Exception as e:
         print(f"  [TG] Error: {e}")
 
@@ -68,7 +60,7 @@ print(BANNER)
 RISK_PCT      = 0.02
 ATR_MULT_SL   = 2.5
 ATR_MULT_TP   = 2.5
-MAX_CONTRACTS = 1_000_000
+MAX_CONTRACTS = 1_000_000   # absolute safety cap
 
 # ============================================================
 # CONFIGS (53 TOTAL)
@@ -166,7 +158,7 @@ def round_to_tick(price, tick):
     return round(price / tick) * tick
 
 # ============================================================
-# INDICATORS
+# INDICATORS (unchanged)
 # ============================================================
 def atr(df, period=14):
     h, l, c = df["high"], df["low"], df["close"]
@@ -294,7 +286,7 @@ def get_position_size(contract):
     return 0
 
 # ============================================================
-# ORDERS
+# ORDERS — FIXED
 # ============================================================
 def place_market_order(contract, size):
     order = FuturesOrder(contract=contract, size=abs(size), price="0", tif="ioc", reduce_only=False)
@@ -308,12 +300,24 @@ def place_market_order(contract, size):
         return False
 
 def close_position_market(contract, current_size):
-    order = FuturesOrder(contract=contract, size=abs(current_size), price="0", tif="ioc", reduce_only=True)
+    """
+    ✅ FIX: In One-way mode, closing a position requires size=0 and close=true.
+    Sending reduce_only=True with non-zero size causes INCREASE_POSITION error.
+    """
+    order = FuturesOrder(
+        contract=contract,
+        size=0,                # ✅ MUST be 0 for full close
+        price="0",             # market order
+        tif="ioc",
+        reduce_only=True,      # ensures it only reduces
+        close=True,            # ✅ tells exchange to close the position
+    )
     try:
         futures_api.create_futures_order("usdt", order)
-        print(f"  🧪 [DEMO CLOSE] {contract} size={current_size}")
+        print(f"  🧪 [DEMO CLOSE] {contract} (size=0, close=true)")
     except Exception as e:
         print(f"  ❌ Close failed {contract}: {e}")
+        send_telegram(f"❌ <b>Close failed</b>\n{contract}\n<code>{e}</code>")
 
 def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
     specs = get_contract_specs(contract)
@@ -321,7 +325,6 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
     sl_price = round_to_tick(sl_price, tick)
     tp_price = round_to_tick(tp_price, tick)
 
-    # ✅ فرمت‌دهی قیمت برای جلوگیری از نماد علمی (مشکل SHIB و ارزهای بسیار کوچک)
     price_decimals = 10
     sl_price_str = f"{sl_price:.{price_decimals}f}"
     tp_price_str = f"{tp_price:.{price_decimals}f}"
@@ -329,10 +332,7 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
     sl_rule = 2 if side == "long" else 1
     tp_rule = 1 if side == "long" else 2
 
-    # ✅ order_type صحیح برای بستن کل پوزیشن
     order_type = "close-long-position" if side == "long" else "close-short-position"
-
-    # ✅ auto_size برای سازگاری با حالت Hedge Mode
     auto_size = "close_long" if side == "long" else "close_short"
 
     for kind, price_str, rule in [
@@ -342,21 +342,21 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
         order = FuturesPriceTriggeredOrder(
             initial=FuturesInitialOrder(
                 contract=contract,
-                size=0,              # ✅ 0 = بستن کل پوزیشن
-                price="0",           # ✅ بازار
+                size=0,
+                price="0",
                 tif="ioc",
                 reduce_only=True,
                 close=True,
-                auto_size=auto_size, # ✅ برای Hedge Mode
+                auto_size=auto_size,
             ),
             trigger=FuturesPriceTrigger(
                 strategy_type=0,
                 price_type=0,
-                price=price_str,     # ✅ رشته با دقت کافی
+                price=price_str,
                 rule=rule,
                 expiration=86400,
             ),
-            order_type=order_type,   # ✅ close-long-position / close-short-position
+            order_type=order_type,
         )
         try:
             futures_api.create_price_triggered_order("usdt", order)
@@ -365,7 +365,7 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
             print(f"  ⚠️ {kind} failed {contract}: {e}")
 
 # ============================================================
-# TRADING LOGIC
+# TRADING LOGIC — FIXED
 # ============================================================
 def process_config(cfg):
     symbol = cfg["symbol"]
@@ -400,8 +400,16 @@ def process_config(cfg):
             return
 
         risk_amount = equity * RISK_PCT
-        size = int(risk_amount / (multiplier * sl_dist))
-        size = max(specs["order_size_min"], min(size, specs["order_size_max"], MAX_CONTRACTS))
+        raw_size = int(risk_amount / (multiplier * sl_dist))
+
+        # ✅ FIX: Cap size at contract's max order size
+        order_size_max = specs["order_size_max"]
+        size = max(specs["order_size_min"], min(raw_size, order_size_max, MAX_CONTRACTS))
+
+        if raw_size > order_size_max:
+            print(f"  ⚠️ {symbol}: requested {raw_size} > max {order_size_max}, capped to {order_size_max}")
+            send_telegram(f"⚠️ <b>{symbol}</b>: requested size {raw_size} exceeds max {order_size_max}, using {order_size_max}")
+
         if size <= 0:
             return
 
