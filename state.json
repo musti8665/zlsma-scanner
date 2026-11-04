@@ -7,5 +7,6 @@
   "FIL_USDT": "FIL/USD|15m|Volume",
   "AAVE_USDT": "AAVE/USDC|30m|Volume",
   "GALA_USDT": "GALA/USDT|30m|Volume",
-  "HBAR_USDT": "HBAR/USDT|30m|MACD"
+  "HBAR_USDT": "HBAR/USDT|30m|MACD",
+  "DOT_USDT": "DOT/USDC|30m|MACD"
 }
