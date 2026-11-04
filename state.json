@@ -3,5 +3,6 @@
   "ETH_USDT": "ETH/BTC|15m|QQE",
   "WIF_USDT": "WIF/USDT|15m|QQE",
   "AVAX_USDT": "AVAX/USDC|5m|Volume",
-  "WLD_USDT": "WLD/USDT|15m|Volume"
+  "WLD_USDT": "WLD/USDT|15m|Volume",
+  "BCH_USDT": "BCH/USDC|5m|Volume"
 }
