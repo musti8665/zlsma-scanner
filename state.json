@@ -2,8 +2,8 @@
   "DOGE_USDT": "DOGE/USDT|30m|MACD",
   "LINK_USDT": "LINK/BTC|30m|Supertrend",
   "GALA_USDT": "GALA/USDT|30m|Volume",
-  "SHIB_USDT": "SHIB/USDT|15m|QQE",
-  "BCH_USDT": "BCH/USDC|15m|Volume",
-  "ETH_USDT": "ETH/BTC|30m|QQE",
-  "FIL_USDT": "FIL/USD|15m|Volume"
+  "FIL_USDT": "FIL/USD|15m|Volume",
+  "BCH_USDT": "BCH/USDC|5m|Volume",
+  "BTC_USDT": "BTC/USDC|15m|MACD",
+  "AVAX_USDT": "AVAX/USDT|30m|MACD"
 }
