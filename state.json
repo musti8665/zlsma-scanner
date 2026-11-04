@@ -3,7 +3,8 @@
   "LINK_USDT": "LINK/BTC|30m|Supertrend",
   "GALA_USDT": "GALA/USDT|30m|Volume",
   "FIL_USDT": "FIL/USD|15m|Volume",
-  "BCH_USDT": "BCH/USDC|5m|Volume",
   "BTC_USDT": "BTC/USDC|15m|MACD",
-  "AVAX_USDT": "AVAX/USDT|30m|MACD"
+  "AVAX_USDT": "AVAX/USDT|30m|MACD",
+  "BCH_USDT": "BCH/USDC|5m|Volume",
+  "DOT_USDT": "DOT/USDC|30m|MACD"
 }
