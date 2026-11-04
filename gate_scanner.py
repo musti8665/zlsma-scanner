@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Short/Long Fixed + Ownership + Reports
-========================================================================
-- Fixes SHORT order bug (preserves negative size)
-- Each strategy can ONLY close positions it opened itself (state.json)
-- No limit on max open positions
-- Sends detailed open positions report (PnL + duration)
-- Gracefully skips trades on high slippage
+Gate.io Futures TestNet Scanner — 10x Leverage + Cooldown + 1:3 R:R
+=====================================================================
+- Leverage forced to 10x
+- Cooldown: skips asset for 2 hours after a loss
+- Better Risk/Reward: SL = 2.5 ATR, TP = 7.5 ATR
+- Fixes SHORT order bug and state management
 """
 
 import os
 import sys
 import json
+import time
 import requests
 import numpy as np
 import pandas as pd
@@ -48,26 +48,22 @@ def send_telegram(text: str):
 if "testnet" not in GATE_HOST.lower():
     sys.exit(99)
 
-BANNER = """
-╔══════════════════════════════════════════════════════════════════════╗
-║   🧪  GATE.IO FUTURES — TESTNET (DEMO)                               ║
-║   ✅  VIRTUAL FUNDS ONLY — NO REAL MONEY                             ║
-║   🌐  https://api-testnet.gateapi.io/api/v4                          ║
-╚══════════════════════════════════════════════════════════════════════╝
-"""
-print(BANNER)
+print("🧪 GATE.IO TESTNET — SAFE MODE (10x LEVERAGE, 1:3 R:R)")
 
 # ============================================================
 # PARAMETERS
 # ============================================================
-RISK_PCT          = 0.02
-ATR_MULT_SL       = 2.5
-ATR_MULT_TP       = 2.5
+RISK_PCT          = 0.02     # 2% ریسک از کل موجودی
+ATR_MULT_SL       = 2.5      # حد ضرر
+ATR_MULT_TP       = 7.5      # حد سود (نسبت 1 به 3)
 MAX_CONTRACTS     = 90_000
+LEVERAGE          = 10       # ✅ لوریج روی 10x تنظیم شد
 STATE_FILE        = "state.json"
+COOLDOWN_FILE     = "cooldown.json"
+COOLDOWN_HOURS    = 2        # اگر معامله ضرر داد، 2 ساعت دست به آن ارز نزن
 
 # ============================================================
-# CONFIGS (53 TOTAL)
+# CONFIGS (لیست 53 تایی)
 # ============================================================
 BEST_CONFIGS = [
     {"symbol": "BCH/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
@@ -135,21 +131,21 @@ _contracts_cache: dict = {}
 _specs_cache:     dict = {}
 _equity_cache:    dict = {}
 
-def load_state():
-    if os.path.exists(STATE_FILE):
+def load_json(file_path):
+    if os.path.exists(file_path):
         try:
-            with open(STATE_FILE, "r") as f:
+            with open(file_path, "r") as f:
                 return json.load(f)
         except Exception:
             return {}
     return {}
 
-def save_state(state):
+def save_json(file_path, data):
     try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f, indent=2)
+        with open(file_path, "w") as f:
+            json.dump(data, f, indent=2)
     except Exception as e:
-        print(f"  ⚠️ Failed to save state: {e}")
+        print(f"  ⚠️ Failed to save {file_path}: {e}")
 
 def get_contracts():
     if "usdt" not in _contracts_cache:
@@ -302,18 +298,17 @@ def get_position_size(contract):
         pass
     return 0
 
+def set_leverage(contract, leverage):
+    try:
+        futures_api.update_position_leverage("usdt", contract, str(leverage))
+    except Exception:
+        pass
+
 # ============================================================
-# ORDERS (اصلاح شده برای شورت)
+# ORDERS
 # ============================================================
 def place_market_order(contract, size):
-    # ✅ علامت size حفظ می‌شود: مثبت = خرید (LONG) / منفی = فروش (SHORT)
-    order = FuturesOrder(
-        contract=contract,
-        size=size,  # <--- تغییر اصلی: abs(size) حذف شد
-        price="0",
-        tif="ioc",
-        reduce_only=False,
-    )
+    order = FuturesOrder(contract=contract, size=size, price="0", tif="ioc", reduce_only=False)
     try:
         futures_api.create_futures_order("usdt", order)
         side_label = "LONG" if size > 0 else "SHORT"
@@ -329,14 +324,7 @@ def place_market_order(contract, size):
         return False
 
 def close_position_market(contract, current_size):
-    order = FuturesOrder(
-        contract=contract,
-        size=0,
-        price="0",
-        tif="ioc",
-        reduce_only=True,
-        close=True,
-    )
+    order = FuturesOrder(contract=contract, size=0, price="0", tif="ioc", reduce_only=True, close=True)
     try:
         futures_api.create_futures_order("usdt", order)
         print(f"  🧪 [DEMO CLOSE] {contract} (size=0, close=true)")
@@ -350,35 +338,17 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
     sl_price = round_to_tick(sl_price, tick)
     tp_price = round_to_tick(tp_price, tick)
 
-    price_decimals = 10
-    sl_price_str = f"{sl_price:.{price_decimals}f}"
-    tp_price_str = f"{tp_price:.{price_decimals}f}"
+    sl_price_str = f"{sl_price:.10f}"
+    tp_price_str = f"{tp_price:.10f}"
 
     sl_rule = 2 if side == "long" else 1
     tp_rule = 1 if side == "long" else 2
-
     order_type = "close-long-position" if side == "long" else "close-short-position"
 
-    for kind, price_str, rule in [
-        ("SL", sl_price_str, sl_rule),
-        ("TP", tp_price_str, tp_rule),
-    ]:
+    for kind, price_str, rule in [("SL", sl_price_str, sl_rule), ("TP", tp_price_str, tp_rule)]:
         order = FuturesPriceTriggeredOrder(
-            initial=FuturesInitialOrder(
-                contract=contract,
-                size=0,
-                price="0",
-                tif="ioc",
-                reduce_only=True,
-                close=True,
-            ),
-            trigger=FuturesPriceTrigger(
-                strategy_type=0,
-                price_type=0,
-                price=price_str,
-                rule=rule,
-                expiration=86400,
-            ),
+            initial=FuturesInitialOrder(contract=contract, size=0, price="0", tif="ioc", reduce_only=True, close=True),
+            trigger=FuturesPriceTrigger(strategy_type=0, price_type=0, price=price_str, rule=rule, expiration=86400),
             order_type=order_type,
         )
         try:
@@ -393,8 +363,7 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
 def send_positions_report():
     try:
         positions = futures_api.list_positions("usdt")
-    except Exception as e:
-        print(f"  [POSITIONS] error: {e}")
+    except Exception:
         return
 
     active = [p for p in positions if int(p.size) != 0]
@@ -417,18 +386,14 @@ def send_positions_report():
         pnl_emoji = "✅" if pnl >= 0 else "❌"
 
         open_time = int(p.open_time) if hasattr(p, "open_time") and p.open_time else None
+        duration_str = "N/A"
         if open_time:
             diff_seconds = now - open_time
             hours = int(diff_seconds // 3600)
             minutes = int((diff_seconds % 3600) // 60)
             duration_str = f"{hours}h {minutes}m"
-        else:
-            duration_str = "N/A"
 
-        if side == "LONG":
-            pct = (mark - entry) / entry * 100 if entry else 0
-        else:
-            pct = (entry - mark) / entry * 100 if entry else 0
+        pct = ((mark - entry) / entry * 100) if side == "LONG" else ((entry - mark) / entry * 100)
 
         lines.append(
             f"{emoji} <b>{p.contract}</b> {side} | Size: {abs(size)}\n"
@@ -457,15 +422,26 @@ def process_config(cfg):
     if df is None or len(df) < 50:
         return
 
-    state = load_state()
+    state = load_json(STATE_FILE)
+    cooldown = load_json(COOLDOWN_FILE)
     current_pos = get_position_size(contract)
     signal = generate_signal(df, strat, params)
     my_key = f"{symbol}|{tf}|{strat}"
 
+    if contract in cooldown:
+        last_loss_time = cooldown[contract]
+        if time.time() - last_loss_time < COOLDOWN_HOURS * 3600:
+            if current_pos == 0 and signal != 0:
+                print(f"  ⏳ {symbol}: in cooldown after recent loss, skipping entry.")
+            return
+
     if current_pos == 0:
         if contract in state:
+            cooldown[contract] = time.time()
+            save_json(COOLDOWN_FILE, cooldown)
+            
             del state[contract]
-            save_state(state)
+            save_json(STATE_FILE, state)
 
         if signal != 0:
             atr_val = atr(df, 14).iloc[-1]
@@ -484,16 +460,14 @@ def process_config(cfg):
 
             risk_amount = equity * RISK_PCT
             raw_size = int(risk_amount / (multiplier * sl_dist))
-
             order_size_max = specs["order_size_max"]
             size = max(specs["order_size_min"], min(raw_size, order_size_max, MAX_CONTRACTS))
 
-            if raw_size > size:
-                print(f"  ⚠️ {symbol}: requested {raw_size} capped to {size}")
-                send_telegram(f"⚠️ <b>{symbol}</b>: requested {raw_size} capped to {size}")
-
             if size <= 0:
                 return
+
+            # ✅ تنظیم لوریج روی 10x
+            set_leverage(contract, LEVERAGE)
 
             if signal == 1:
                 side = "long"
@@ -502,7 +476,7 @@ def process_config(cfg):
                 print(f"  📈 LONG {symbol} {tf} {strat} size={size}")
                 if place_market_order(contract, size):
                     state[contract] = my_key
-                    save_state(state)
+                    save_json(STATE_FILE, state)
                     place_sl_tp_orders(contract, "long", price - sl_dist, price + tp_dist, price, size)
                     send_telegram(
                         f"{emoji} <b>{label}</b> {symbol} <code>{tf}</code>\n"
@@ -511,6 +485,7 @@ def process_config(cfg):
                         f"📦 Size: <code>{size}</code>\n"
                         f"🛡️ SL: <code>{price - sl_dist:.6f}</code>\n"
                         f"🎯 TP: <code>{price + tp_dist:.6f}</code>\n"
+                        f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
                         f"🧪 <i>TESTNET — NO REAL MONEY</i>"
                     )
             elif signal == -1:
@@ -518,9 +493,9 @@ def process_config(cfg):
                 emoji = "📉"
                 label = "SHORT"
                 print(f"  📉 SHORT {symbol} {tf} {strat} size={size}")
-                if place_market_order(contract, -size):  # ✅ ارسال اندازه منفی برای شورت
+                if place_market_order(contract, -size):
                     state[contract] = my_key
-                    save_state(state)
+                    save_json(STATE_FILE, state)
                     place_sl_tp_orders(contract, "short", price + sl_dist, price - tp_dist, price, size)
                     send_telegram(
                         f"{emoji} <b>{label}</b> {symbol} <code>{tf}</code>\n"
@@ -529,6 +504,7 @@ def process_config(cfg):
                         f"📦 Size: <code>{size}</code>\n"
                         f"🛡️ SL: <code>{price + sl_dist:.6f}</code>\n"
                         f"🎯 TP: <code>{price - tp_dist:.6f}</code>\n"
+                        f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
                         f"🧪 <i>TESTNET — NO REAL MONEY</i>"
                     )
 
@@ -536,7 +512,7 @@ def process_config(cfg):
         owner = state.get(contract)
         if owner is None:
             state[contract] = my_key
-            save_state(state)
+            save_json(STATE_FILE, state)
             owner = my_key
 
         if owner != my_key:
@@ -546,7 +522,11 @@ def process_config(cfg):
             print(f"  🔄 Reverse {symbol}, closing (owner: {owner})")
             close_position_market(contract, current_pos)
             del state[contract]
-            save_state(state)
+            save_json(STATE_FILE, state)
+            
+            cooldown[contract] = time.time()
+            save_json(COOLDOWN_FILE, cooldown)
+
             side_label = "LONG" if current_pos > 0 else "SHORT"
             send_telegram(
                 f"🚪 <b>CLOSED</b> {side_label} {symbol} <code>{tf}</code>\n"
@@ -560,10 +540,10 @@ def process_config(cfg):
 # ============================================================
 def main():
     print("=" * 70)
-    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — NO REAL MONEY")
+    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — SAFE MODE")
     print(f"🌐 HOST        : {GATE_HOST}")
+    print(f"⚙️ LEVERAGE    : {LEVERAGE}x")
     print(f"📊 CONFIGS     : {len(BEST_CONFIGS)}")
-    print(f"🕒 TIME        : {datetime.now(timezone.utc).isoformat()}")
     print("=" * 70)
 
     try:
@@ -572,7 +552,6 @@ def main():
         print(f"\n✅ Connected. USDT equity: {equity:.2f}\n")
     except Exception as e:
         print(f"❌ Connection failed: {e}")
-        send_telegram(f"❌ <b>Connection failed</b>\n<code>{e}</code>")
         sys.exit(1)
 
     _equity_cache["usdt"] = equity
@@ -580,6 +559,7 @@ def main():
     send_telegram(
         f"🧪 <b>Gate.io TestNet Scanner — Run Started</b>\n"
         f"💰 Equity: <code>${equity:.2f} USDT</code>\n"
+        f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
         f"📊 Configs: <code>{len(BEST_CONFIGS)}</code>\n"
         f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
     )
