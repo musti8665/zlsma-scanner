@@ -2,6 +2,6 @@
   "BTC_USDT": "BTC/USDT|5m|QQE",
   "ETH_USDT": "ETH/USDC|30m|Supertrend",
   "AVAX_USDT": "AVAX/USD|15m|Volume",
-  "BCH_USDT": "BCH/USDC|5m|Volume",
-  "DOT_USDT": "DOT/USDC|5m|Volume"
+  "DOT_USDT": "DOT/USDC|5m|Volume",
+  "GALA_USDT": "GALA/USDT|30m|Volume"
 }
