@@ -1,3 +1,9 @@
 {
-  "ADA_USDT": "ADA/USDT|30m|Supertrend"
+  "ADA_USDT": "ADA/USDT|30m|Supertrend",
+  "AVAX_USDT": "AVAX/USDC|5m|Volume",
+  "BTC_USDT": "BTC/USDT|5m|QQE",
+  "ETH_USDT": "ETH/BTC|30m|QQE",
+  "FIL_USDT": "FIL/USD|15m|Volume",
+  "AAVE_USDT": "AAVE/USDC|30m|Volume",
+  "DOGE_USDT": "DOGE/USDT|30m|MACD"
 }
