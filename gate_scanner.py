@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Unlimited Positions + Duration Report
+Gate.io Futures TestNet Scanner — Short/Long Fixed + Ownership + Reports
 ========================================================================
+- Fixes SHORT order bug (preserves negative size)
+- Each strategy can ONLY close positions it opened itself (state.json)
 - No limit on max open positions
-- Sends a detailed report of all open positions with live PnL and open duration
-- Fixes AUTO_INVALID_PARAM_CLOSE, MARKET_ORDER_SIZE_TOO_LARGE
-- Telegram notifications enabled
+- Sends detailed open positions report (PnL + duration)
+- Gracefully skips trades on high slippage
 """
 
 import os
@@ -63,7 +64,7 @@ RISK_PCT          = 0.02
 ATR_MULT_SL       = 2.5
 ATR_MULT_TP       = 2.5
 MAX_CONTRACTS     = 90_000
-# محدودیت تعداد پوزیشن برداشته شد (No MAX_OPEN_POSITIONS)
+STATE_FILE        = "state.json"
 
 # ============================================================
 # CONFIGS (53 TOTAL)
@@ -125,7 +126,7 @@ BEST_CONFIGS = [
 ]
 
 # ============================================================
-# CLIENT
+# CLIENT & STATE
 # ============================================================
 config = Configuration(key=API_KEY, secret=API_SECRET, host=GATE_HOST)
 futures_api = FuturesApi(ApiClient(config))
@@ -133,6 +134,22 @@ futures_api = FuturesApi(ApiClient(config))
 _contracts_cache: dict = {}
 _specs_cache:     dict = {}
 _equity_cache:    dict = {}
+
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f"  ⚠️ Failed to save state: {e}")
 
 def get_contracts():
     if "usdt" not in _contracts_cache:
@@ -286,17 +303,29 @@ def get_position_size(contract):
     return 0
 
 # ============================================================
-# ORDERS
+# ORDERS (اصلاح شده برای شورت)
 # ============================================================
 def place_market_order(contract, size):
-    order = FuturesOrder(contract=contract, size=abs(size), price="0", tif="ioc", reduce_only=False)
+    # ✅ علامت size حفظ می‌شود: مثبت = خرید (LONG) / منفی = فروش (SHORT)
+    order = FuturesOrder(
+        contract=contract,
+        size=size,  # <--- تغییر اصلی: abs(size) حذف شد
+        price="0",
+        tif="ioc",
+        reduce_only=False,
+    )
     try:
         futures_api.create_futures_order("usdt", order)
-        print(f"  🧪 [DEMO] {'LONG' if size > 0 else 'SHORT'} {contract} size={abs(size)}")
+        side_label = "LONG" if size > 0 else "SHORT"
+        print(f"  🧪 [DEMO] {side_label} {contract} size={abs(size)}")
         return True
     except Exception as e:
-        print(f"  ❌ Market failed {contract}: {e}")
-        send_telegram(f"❌ <b>Market failed</b>\n{contract}\n<code>{e}</code>")
+        error_msg = str(e)
+        if "MARKET_PRICE_TOO_DEVIATED" in error_msg or "slip ratio" in error_msg.lower():
+            print(f"  ⏸️ Skipped {contract}: High slippage detected by exchange.")
+        else:
+            print(f"  ❌ Market failed {contract}: {e}")
+            send_telegram(f"❌ <b>Market failed</b>\n{contract}\n<code>{e}</code>")
         return False
 
 def close_position_market(contract, current_size):
@@ -359,10 +388,9 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
             print(f"  ⚠️ {kind} failed {contract}: {e}")
 
 # ============================================================
-# POSITION REPORT (WITH DURATION)
+# POSITION REPORT
 # ============================================================
 def send_positions_report():
-    """گزارش وضعیت پوزیشن‌های باز همراه با سود/ضرر و مدت زمان باز بودن"""
     try:
         positions = futures_api.list_positions("usdt")
     except Exception as e:
@@ -388,7 +416,6 @@ def send_positions_report():
         total_pnl += pnl
         pnl_emoji = "✅" if pnl >= 0 else "❌"
 
-        # محاسبه مدت زمان باز بودن معامله
         open_time = int(p.open_time) if hasattr(p, "open_time") and p.open_time else None
         if open_time:
             diff_seconds = now - open_time
@@ -430,71 +457,96 @@ def process_config(cfg):
     if df is None or len(df) < 50:
         return
 
+    state = load_state()
     current_pos = get_position_size(contract)
     signal = generate_signal(df, strat, params)
+    my_key = f"{symbol}|{tf}|{strat}"
 
-    # محدودیت برداشته شد، بدون چک کردن MAX_OPEN_POSITIONS
+    if current_pos == 0:
+        if contract in state:
+            del state[contract]
+            save_state(state)
 
-    if signal != 0 and current_pos == 0:
-        atr_val = atr(df, 14).iloc[-1]
-        price = df["close"].iloc[-1]
-        if atr_val <= 0 or price <= 0:
+        if signal != 0:
+            atr_val = atr(df, 14).iloc[-1]
+            price = df["close"].iloc[-1]
+            if atr_val <= 0 or price <= 0:
+                return
+
+            specs = get_contract_specs(contract)
+            multiplier = specs["quanto_multiplier"]
+            sl_dist = atr_val * ATR_MULT_SL
+            tp_dist = sl_dist * ATR_MULT_TP
+
+            equity = _equity_cache.get("usdt", 0.0)
+            if equity <= 0:
+                return
+
+            risk_amount = equity * RISK_PCT
+            raw_size = int(risk_amount / (multiplier * sl_dist))
+
+            order_size_max = specs["order_size_max"]
+            size = max(specs["order_size_min"], min(raw_size, order_size_max, MAX_CONTRACTS))
+
+            if raw_size > size:
+                print(f"  ⚠️ {symbol}: requested {raw_size} capped to {size}")
+                send_telegram(f"⚠️ <b>{symbol}</b>: requested {raw_size} capped to {size}")
+
+            if size <= 0:
+                return
+
+            if signal == 1:
+                side = "long"
+                emoji = "📈"
+                label = "LONG"
+                print(f"  📈 LONG {symbol} {tf} {strat} size={size}")
+                if place_market_order(contract, size):
+                    state[contract] = my_key
+                    save_state(state)
+                    place_sl_tp_orders(contract, "long", price - sl_dist, price + tp_dist, price, size)
+                    send_telegram(
+                        f"{emoji} <b>{label}</b> {symbol} <code>{tf}</code>\n"
+                        f"🎯 Strategy: <b>{strat}</b>\n"
+                        f"💰 Entry: <code>{price:.6f}</code>\n"
+                        f"📦 Size: <code>{size}</code>\n"
+                        f"🛡️ SL: <code>{price - sl_dist:.6f}</code>\n"
+                        f"🎯 TP: <code>{price + tp_dist:.6f}</code>\n"
+                        f"🧪 <i>TESTNET — NO REAL MONEY</i>"
+                    )
+            elif signal == -1:
+                side = "short"
+                emoji = "📉"
+                label = "SHORT"
+                print(f"  📉 SHORT {symbol} {tf} {strat} size={size}")
+                if place_market_order(contract, -size):  # ✅ ارسال اندازه منفی برای شورت
+                    state[contract] = my_key
+                    save_state(state)
+                    place_sl_tp_orders(contract, "short", price + sl_dist, price - tp_dist, price, size)
+                    send_telegram(
+                        f"{emoji} <b>{label}</b> {symbol} <code>{tf}</code>\n"
+                        f"🎯 Strategy: <b>{strat}</b>\n"
+                        f"💰 Entry: <code>{price:.6f}</code>\n"
+                        f"📦 Size: <code>{size}</code>\n"
+                        f"🛡️ SL: <code>{price + sl_dist:.6f}</code>\n"
+                        f"🎯 TP: <code>{price - tp_dist:.6f}</code>\n"
+                        f"🧪 <i>TESTNET — NO REAL MONEY</i>"
+                    )
+
+    else:
+        owner = state.get(contract)
+        if owner is None:
+            state[contract] = my_key
+            save_state(state)
+            owner = my_key
+
+        if owner != my_key:
             return
 
-        specs = get_contract_specs(contract)
-        multiplier = specs["quanto_multiplier"]
-        sl_dist = atr_val * ATR_MULT_SL
-        tp_dist = sl_dist * ATR_MULT_TP
-
-        equity = _equity_cache.get("usdt", 0.0)
-        if equity <= 0:
-            return
-
-        risk_amount = equity * RISK_PCT
-        raw_size = int(risk_amount / (multiplier * sl_dist))
-
-        order_size_max = specs["order_size_max"]
-        size = max(specs["order_size_min"], min(raw_size, order_size_max, MAX_CONTRACTS))
-
-        if raw_size > size:
-            print(f"  ⚠️ {symbol}: requested {raw_size} capped to {size}")
-            send_telegram(f"⚠️ <b>{symbol}</b>: requested {raw_size} capped to {size}")
-
-        if size <= 0:
-            return
-
-        if signal == 1:
-            side = "long"
-            emoji = "📈"
-            label = "LONG"
-            print(f"  📈 LONG {symbol} {tf} {strat} size={size}")
-        else:
-            side = "short"
-            emoji = "📉"
-            label = "SHORT"
-            print(f"  📉 SHORT {symbol} {tf} {strat} size={size}")
-
-        send_telegram(
-            f"{emoji} <b>{label}</b> {symbol} <code>{tf}</code>\n"
-            f"🎯 Strategy: <b>{strat}</b>\n"
-            f"💰 Entry: <code>{price:.6f}</code>\n"
-            f"📦 Size: <code>{size}</code>\n"
-            f"🛡️ SL: <code>{price - sl_dist if side == 'long' else price + sl_dist:.6f}</code>\n"
-            f"🎯 TP: <code>{price + tp_dist if side == 'long' else price - tp_dist:.6f}</code>\n"
-            f"🧪 <i>TESTNET — NO REAL MONEY</i>"
-        )
-
-        if side == "long":
-            if place_market_order(contract, size):
-                place_sl_tp_orders(contract, "long", price - sl_dist, price + tp_dist, price, size)
-        else:
-            if place_market_order(contract, -size):
-                place_sl_tp_orders(contract, "short", price + sl_dist, price - tp_dist, price, size)
-
-    elif current_pos != 0:
         if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
-            print(f"  🔄 Reverse {symbol}, closing")
+            print(f"  🔄 Reverse {symbol}, closing (owner: {owner})")
             close_position_market(contract, current_pos)
+            del state[contract]
+            save_state(state)
             side_label = "LONG" if current_pos > 0 else "SHORT"
             send_telegram(
                 f"🚪 <b>CLOSED</b> {side_label} {symbol} <code>{tf}</code>\n"
@@ -532,7 +584,6 @@ def main():
         f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
     )
 
-    # ✅ ارسال گزارش پوزیشن‌های باز در ابتدای هر اجرا
     send_positions_report()
 
     print(f"\n🚀 Processing {len(BEST_CONFIGS)} configs...\n")
@@ -543,7 +594,6 @@ def main():
         except Exception as e:
             print(f"  ❌ {cfg['symbol']} {cfg['timeframe']}: {e}")
 
-    # ✅ ارسال گزارش نهایی بعد از پردازش (برای دیدن تغییرات احتمالی)
     send_positions_report()
 
     print(f"\n✅ Run complete — TESTNET (no real money touched)")
