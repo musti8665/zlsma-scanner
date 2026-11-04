@@ -3,5 +3,6 @@
   "AVAX_USDT": "AVAX/USD|15m|Volume",
   "SHIB_USDT": "SHIB/USDT|15m|QQE",
   "FIL_USDT": "FIL/USD|15m|QQE",
-  "BTC_USDT": "BTC/USDT|5m|QQE"
+  "BTC_USDT": "BTC/USDT|5m|QQE",
+  "GALA_USDT": "GALA/USDT|30m|Volume"
 }
