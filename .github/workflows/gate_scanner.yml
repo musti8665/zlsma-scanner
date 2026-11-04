@@ -52,10 +52,11 @@ jobs:
           PYTHONUNBUFFERED: 1
         run: python gate_scanner.py
 
-      # ✅ کامیت کردن فایل state.json بعد از هر اجرا
+      # ✅ این بخش اصلاح شد
       - name: Commit state
         if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "🧪 chore(testnet): update state [skip ci]"
           file_pattern: "state.json"
+          pull: --rebase --autostash   # <--- این خط اضافه شد تا تغییرات قبلی را بگیرد
