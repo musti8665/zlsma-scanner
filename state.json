@@ -6,6 +6,6 @@
   "ETH_USDT": "ETH/USDC|30m|Supertrend",
   "FIL_USDT": "FIL/USD|15m|Volume",
   "AAVE_USDT": "AAVE/USDC|30m|Volume",
-  "SOL_USDT": "SOL/USDT|15m|Supertrend",
-  "GALA_USDT": "GALA/USDT|30m|Volume"
+  "GALA_USDT": "GALA/USDT|30m|Volume",
+  "HBAR_USDT": "HBAR/USDT|30m|MACD"
 }
