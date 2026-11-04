@@ -3,9 +3,9 @@
   "LINK_USDT": "LINK/BTC|30m|Supertrend",
   "BTC_USDT": "BTC/USDC|15m|MACD",
   "AVAX_USDT": "AVAX/USDT|30m|MACD",
-  "BCH_USDT": "BCH/USDC|5m|Volume",
   "ETH_USDT": "ETH/USDC|30m|Supertrend",
   "FIL_USDT": "FIL/USD|15m|Volume",
   "AAVE_USDT": "AAVE/USDC|30m|Volume",
-  "SOL_USDT": "SOL/USDT|15m|Supertrend"
+  "SOL_USDT": "SOL/USDT|15m|Supertrend",
+  "GALA_USDT": "GALA/USDT|30m|Volume"
 }
