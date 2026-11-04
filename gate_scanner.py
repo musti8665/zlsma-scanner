@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — 10x Leverage + Cooldown + 1:3 R:R
-=====================================================================
+Gate.io Futures TestNet Scanner — Detailed Close Report
+========================================================
+- Adds Entry/Exit price, PnL, and Duration to the "CLOSED" Telegram message
 - Leverage forced to 10x
 - Cooldown: skips asset for 2 hours after a loss
 - Better Risk/Reward: SL = 2.5 ATR, TP = 7.5 ATR
-- Fixes SHORT order bug and state management
 """
 
 import os
@@ -53,17 +53,17 @@ print("🧪 GATE.IO TESTNET — SAFE MODE (10x LEVERAGE, 1:3 R:R)")
 # ============================================================
 # PARAMETERS
 # ============================================================
-RISK_PCT          = 0.02     # 2% ریسک از کل موجودی
-ATR_MULT_SL       = 2.5      # حد ضرر
-ATR_MULT_TP       = 7.5      # حد سود (نسبت 1 به 3)
+RISK_PCT          = 0.02
+ATR_MULT_SL       = 2.5
+ATR_MULT_TP       = 7.5
 MAX_CONTRACTS     = 90_000
-LEVERAGE          = 10       # ✅ لوریج روی 10x تنظیم شد
+LEVERAGE          = 10
 STATE_FILE        = "state.json"
 COOLDOWN_FILE     = "cooldown.json"
-COOLDOWN_HOURS    = 2        # اگر معامله ضرر داد، 2 ساعت دست به آن ارز نزن
+COOLDOWN_HOURS    = 2
 
 # ============================================================
-# CONFIGS (لیست 53 تایی)
+# CONFIGS (53 TOTAL)
 # ============================================================
 BEST_CONFIGS = [
     {"symbol": "BCH/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
@@ -289,14 +289,21 @@ def get_equity():
     except Exception:
         return 0.0
 
-def get_position_size(contract):
+# ✅ تابع جدید برای دریافت اطلاعات کامل پوزیشن
+def get_position_info(contract):
     try:
         for p in futures_api.list_positions("usdt"):
-            if p.contract == contract:
-                return int(p.size)
+            if p.contract == contract and int(p.size) != 0:
+                return {
+                    "size": int(p.size),
+                    "entry_price": float(p.entry_price),
+                    "mark_price": float(p.mark_price),
+                    "unrealised_pnl": float(p.unrealised_pnl),
+                    "open_time": int(p.open_time) if hasattr(p, "open_time") and p.open_time else None
+                }
     except Exception:
         pass
-    return 0
+    return None
 
 def set_leverage(contract, leverage):
     try:
@@ -424,7 +431,11 @@ def process_config(cfg):
 
     state = load_json(STATE_FILE)
     cooldown = load_json(COOLDOWN_FILE)
-    current_pos = get_position_size(contract)
+    
+    # ✅ دریافت اطلاعات کامل پوزیشن
+    pos_info = get_position_info(contract)
+    current_pos = pos_info["size"] if pos_info else 0
+
     signal = generate_signal(df, strat, params)
     my_key = f"{symbol}|{tf}|{strat}"
 
@@ -466,7 +477,6 @@ def process_config(cfg):
             if size <= 0:
                 return
 
-            # ✅ تنظیم لوریج روی 10x
             set_leverage(contract, LEVERAGE)
 
             if signal == 1:
@@ -518,20 +528,44 @@ def process_config(cfg):
         if owner != my_key:
             return
 
+        # ✅ بستن با سیگنال مخالف و محاسبه سود/ضرر و مدت زمان
         if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
             print(f"  🔄 Reverse {symbol}, closing (owner: {owner})")
+            
+            # استخراج اطلاعات قبل از بستن
+            entry = pos_info["entry_price"]
+            mark = pos_info["mark_price"]
+            pnl = pos_info["unrealised_pnl"]
+            open_time = pos_info["open_time"]
+            
+            duration_str = "N/A"
+            if open_time:
+                now = datetime.now(timezone.utc).timestamp()
+                diff_seconds = now - open_time
+                hours = int(diff_seconds // 3600)
+                minutes = int((diff_seconds % 3600) // 60)
+                duration_str = f"{hours}h {minutes}m"
+
+            # بستن پوزیشن
             close_position_market(contract, current_pos)
+            
+            # آپدیت فایل‌ها
             del state[contract]
             save_json(STATE_FILE, state)
-            
             cooldown[contract] = time.time()
             save_json(COOLDOWN_FILE, cooldown)
 
             side_label = "LONG" if current_pos > 0 else "SHORT"
+            pnl_emoji = "✅" if pnl >= 0 else "❌"
+
+            # ✅ پیام تلگرام کامل با جزئیات
             send_telegram(
                 f"🚪 <b>CLOSED</b> {side_label} {symbol} <code>{tf}</code>\n"
                 f"🎯 Strategy: <b>{strat}</b>\n"
                 f"📦 Size: <code>{abs(current_pos)}</code>\n"
+                f"⏱ Open: <code>{duration_str}</code>\n"
+                f"💰 Entry: <code>{entry:.6f}</code> | Mark: <code>{mark:.6f}</code>\n"
+                f"📊 PnL: {pnl_emoji} <code>{pnl:+.4f} USDT</code>\n"
                 f"🧪 <i>TESTNET</i>"
             )
 
