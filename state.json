@@ -2,5 +2,6 @@
   "ETH_USDT": "ETH/USDC|30m|Supertrend",
   "AVAX_USDT": "AVAX/USD|15m|Volume",
   "WIF_USDT": "WIF/USDT|15m|QQE",
-  "SHIB_USDT": "SHIB/USDT|15m|QQE"
+  "SHIB_USDT": "SHIB/USDT|15m|QQE",
+  "FIL_USDT": "FIL/USD|15m|QQE"
 }
