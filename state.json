@@ -4,6 +4,5 @@
   "GALA_USDT": "GALA/USDT|30m|Volume",
   "ETH_USDT": "ETH/BTC|30m|QQE",
   "DOGE_USDT": "DOGE/USDT|30m|MACD",
-  "LINK_USDT": "LINK/BTC|30m|Supertrend",
-  "AVAX_USDT": "AVAX/USD|15m|Volume"
+  "LINK_USDT": "LINK/BTC|30m|Supertrend"
 }
