@@ -8,5 +8,6 @@
   "AAVE_USDT": "AAVE/USDC|30m|Volume",
   "GALA_USDT": "GALA/USDT|30m|Volume",
   "HBAR_USDT": "HBAR/USDT|30m|MACD",
-  "DOT_USDT": "DOT/USDC|30m|MACD"
+  "DOT_USDT": "DOT/USDC|30m|MACD",
+  "WLD_USDT": "WLD/USDT|15m|Volume"
 }
