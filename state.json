@@ -1,1 +1,12 @@
-{}
+{
+  "AVAX_USDT": "AVAX/USDC|5m|Volume",
+  "BTC_USDT": "BTC/USDT|5m|QQE",
+  "ETH_USDT": "ETH/BTC|30m|QQE",
+  "LINK_USDT": "LINK/BTC|30m|Supertrend",
+  "FIL_USDT": "FIL/USD|15m|Volume",
+  "AAVE_USDT": "AAVE/USDC|30m|Volume",
+  "DOGE_USDT": "DOGE/USDT|30m|MACD",
+  "WLD_USDT": "WLD/USDT|15m|Volume",
+  "HBAR_USDT": "HBAR/USDT|30m|MACD",
+  "GALA_USDT": "GALA/USDT|30m|Volume"
+}
