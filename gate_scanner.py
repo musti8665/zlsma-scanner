@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Available Margin Check
-========================================================
-- Checks Free Margin before entering a trade (fixes INSUFFICIENT_AVAILABLE)
-- Calculates Win/Loss stats for the last 50 trades
-- Leverage: 10x, Cooldown: 4 hours after loss
+Gate.io Futures TestNet Scanner — Ultimate Golden 10
+====================================================
+- Uses the 10 verified best configs (ENA, SUI, KAS, AVAX, ETH, DOT, SOL)
+- Leverage: 10x, Cooldown: 4 hours, Risk: 2% per trade
+- Pure ATR Exit: SL = 2.5 ATR, TP = 7.5 ATR (1:3 R:R)
+- Prevents INSUFFICIENT_AVAILABLE by checking free margin
+- Auto-creates state.json and cooldown.json if missing
 """
 
 import os
@@ -47,7 +49,7 @@ def send_telegram(text: str):
 if "testnet" not in GATE_HOST.lower():
     sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — SAFE MODE (10x LEVERAGE, 4H COOLDOWN)")
+print("🧪 GATE.IO TESTNET — ULTIMATE GOLDEN 10 CONFIGS")
 
 # ============================================================
 # PARAMETERS
@@ -62,62 +64,38 @@ COOLDOWN_FILE     = "cooldown.json"
 COOLDOWN_HOURS    = 4
 
 # ============================================================
-# CONFIGS (53 TOTAL)
+# ✅ ULTIMATE GOLDEN 10 CONFIGS (Dual-Backtest Verified)
 # ============================================================
 BEST_CONFIGS = [
-    {"symbol": "BCH/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
-    {"symbol": "AVAX/USDC", "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 20}},
-    {"symbol": "DOT/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
-    {"symbol": "GRT/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
-    {"symbol": "BCH/USDC",  "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
-    {"symbol": "DOT/USDC",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-    {"symbol": "AVAX/USDC", "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
-    {"symbol": "BTC/USDT",  "timeframe": "5m",  "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "AVAX/USD",  "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
-    {"symbol": "HYPE/USD",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 3, "factor": 4.236}},
-    {"symbol": "CRV/USDC",  "timeframe": "5m",  "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 4.236}},
-    {"symbol": "LDO/USD",   "timeframe": "5m",  "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 2.5}},
-    {"symbol": "CRV/USDC",  "timeframe": "5m",  "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 50}},
-    {"symbol": "ETH/BTC",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "ETH/USDC",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
+    # 1. برنده جدید (بیشترین شارپ) - ENA
+    {"symbol": "ENA/USDT",  "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
+    
+    # 2. برنده جدید (بیشترین بازده ۳۰ دقیقه) - SUI
+    {"symbol": "SUI/USDT",  "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 4.236}},
+    
+    # 3. برنده جدید (بهترین MACD) - KAS
+    {"symbol": "KAS/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    
+    # 4. برنده جدید (بهترین Volume) - KAS
+    {"symbol": "KAS/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 50}},
+
+    # 5. برنده جدید (بهترین 5m جدید) - SUI
+    {"symbol": "SUI/USDT",  "timeframe": "5m",  "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
+    
+    # 6. قهرمان قبلی (بیشترین شارپ اولیه) - AVAX
     {"symbol": "AVAX/USDT", "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-    {"symbol": "CRV/USD",   "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-    {"symbol": "LINK/BTC",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
-    {"symbol": "ETH/BTC",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 2.5}},
-    {"symbol": "ETH/USDT",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
-    {"symbol": "CRV/USDC",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
-    {"symbol": "LDO/USD",   "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-    {"symbol": "ARB/USD",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "AVAX/USDT", "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
-    {"symbol": "FIL/USD",   "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 20}},
-    {"symbol": "FIL/USD",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "AAVE/USDC", "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 50}},
-    {"symbol": "AAVE/USDT", "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-    {"symbol": "BTC/USDC",  "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
-    {"symbol": "AVAX/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-    {"symbol": "SHIB/USDT", "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "PEPE/USDT", "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "DOGE/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "ADA/USDT",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
-    {"symbol": "NEAR/USDT", "timeframe": "15m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "INJ/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "OP/USDT",   "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
+    
+    # 7. برنده قبلی (بازده بالا) - AVAX
+    {"symbol": "AVAX/USD",  "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
+    
+    # 8. استراتژی پایدار ETH
+    {"symbol": "ETH/USDC",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
+    
+    # 9. استراتژی پایدار DOT (از تست بدون ATR)
+    {"symbol": "DOT/USDC",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
+    
+    # 10. استراتژی پایدار SOL
     {"symbol": "SOL/USDT",  "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
-    {"symbol": "WIF/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 3, "factor": 3.0}},
-    {"symbol": "ICP/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "SEI/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "WLD/USDT",  "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
-    {"symbol": "THETA/USDT","timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "STX/USDT",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
-    {"symbol": "RUNE/USDT", "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "HBAR/USDT", "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "GALA/USDT", "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
-    {"symbol": "BONK/USDT", "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "NOT/USDT",  "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}},
-    {"symbol": "TRX/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "TON/USDT",  "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
-    {"symbol": "SAND/USDT", "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
-    {"symbol": "MANA/USDT", "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 20}},
 ]
 
 # ============================================================
@@ -130,15 +108,23 @@ _contracts_cache: dict = {}
 _specs_cache:     dict = {}
 _equity_cache:    dict = {}
 _available_cache: dict = {}
+_candles_cache:   dict = {}
+_positions_cache: dict = {}
+
+# ✅ ساخت خودکار فایل‌های حافظه در صورت نبودن
+if not os.path.exists(STATE_FILE):
+    with open(STATE_FILE, "w") as f:
+        json.dump({}, f)
+if not os.path.exists(COOLDOWN_FILE):
+    with open(COOLDOWN_FILE, "w") as f:
+        json.dump({}, f)
 
 def load_json(file_path):
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
+    try:
+        with open(file_path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 def save_json(file_path, data):
     try:
@@ -259,6 +245,10 @@ def generate_signal(df, strat, params):
 # DATA & ACCOUNT
 # ============================================================
 def fetch_gate_candles(contract, timeframe, limit=200):
+    cache_key = (contract, timeframe)
+    if cache_key in _candles_cache:
+        return _candles_cache[cache_key]
+
     url = f"{GATE_HOST}/futures/usdt/candlesticks"
     try:
         r = requests.get(url, params={"contract": contract, "interval": timeframe, "limit": limit}, timeout=15)
@@ -271,6 +261,7 @@ def fetch_gate_candles(contract, timeframe, limit=200):
         for col in ["o", "h", "l", "c", "v"]:
             df[col] = df[col].astype(float)
         df = df.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"})
+        _candles_cache[cache_key] = df
         return df
     except Exception:
         return None
@@ -285,13 +276,11 @@ def resolve_contract(symbol):
 
 def get_equity():
     try:
-        acc = futures_api.list_futures_accounts("usdt")
-        return float(acc.total)
+        return float(futures_api.list_futures_accounts("usdt").total)
     except Exception:
         return 0.0
 
 def get_available():
-    """دریافت موجودی آزاد (Free Margin)"""
     try:
         acc = futures_api.list_futures_accounts("usdt")
         return float(acc.available) if hasattr(acc, "available") else 0.0
@@ -332,7 +321,7 @@ def place_market_order(contract, size):
     except Exception as e:
         error_msg = str(e)
         if "MARKET_PRICE_TOO_DEVIATED" in error_msg or "slip ratio" in error_msg.lower():
-            print(f"  ⏸️ Skipped {contract}: High slippage detected.")
+            print(f"  ⏸️ Skipped {contract}: High slippage.")
         elif "INSUFFICIENT_AVAILABLE" in error_msg:
             print(f"  ⏸️ Skipped {contract}: Insufficient margin.")
         else:
@@ -425,22 +414,20 @@ def send_positions_report():
 def send_trade_stats():
     try:
         closed = futures_api.list_position_close("usdt", limit=50)
-    except Exception as e:
-        print(f"  [STATS] error: {e}")
+    except Exception:
         return
 
     if not closed:
-        send_telegram("📈 <b>Trade Stats:</b> No closed trades found yet.")
+        send_telegram("📈 <b>Trade Stats:</b> No closed trades yet.")
         return
 
     total = len(closed)
     wins = sum(1 for p in closed if float(p.pnl) > 0)
     losses = sum(1 for p in closed if float(p.pnl) < 0)
     total_pnl = sum(float(p.pnl) for p in closed)
-
     win_rate = (wins / total * 100) if total > 0 else 0
 
-    msg = (
+    send_telegram(
         f"📈 <b>Last {total} Closed Trades:</b>\n"
         f"✅ Wins: <code>{wins}</code>\n"
         f"❌ Losses: <code>{losses}</code>\n"
@@ -448,7 +435,6 @@ def send_trade_stats():
         f"💰 Total PnL: <code>{total_pnl:+.4f} USDT</code>\n"
         f"🧪 <i>TESTNET</i>"
     )
-    send_telegram(msg)
 
 # ============================================================
 # TRADING LOGIC
@@ -469,24 +455,23 @@ def process_config(cfg):
 
     state = load_json(STATE_FILE)
     cooldown = load_json(COOLDOWN_FILE)
+    
     pos_info = get_position_info(contract)
     current_pos = pos_info["size"] if pos_info else 0
-
+    
     signal = generate_signal(df, strat, params)
     my_key = f"{symbol}|{tf}|{strat}"
 
     if contract in cooldown:
-        last_loss_time = cooldown[contract]
-        if time.time() - last_loss_time < COOLDOWN_HOURS * 3600:
+        if time.time() - cooldown[contract] < COOLDOWN_HOURS * 3600:
             if current_pos == 0 and signal != 0:
-                print(f"  ⏳ {symbol}: in cooldown after recent loss, skipping entry.")
+                print(f"  ⏳ {symbol}: in cooldown, skipping.")
             return
 
     if current_pos == 0:
         if contract in state:
             cooldown[contract] = time.time()
             save_json(COOLDOWN_FILE, cooldown)
-            
             del state[contract]
             save_json(STATE_FILE, state)
 
@@ -513,53 +498,45 @@ def process_config(cfg):
             if size <= 0:
                 return
 
-            # ✅ محاسبه مارجین مورد نیاز و چک کردن موجودی آزاد
             required_margin = (size * multiplier * price) / LEVERAGE
             available = _available_cache.get("usdt", 0.0)
-            
             if required_margin > available:
-                print(f"  ⏸️ {symbol}: Need {required_margin:.2f} margin, but only {available:.2f} available. Skipping.")
+                print(f"  ⏸️ {symbol}: Need {required_margin:.2f} margin, only {available:.2f} available.")
                 return
 
             set_leverage(contract, LEVERAGE)
 
             if signal == 1:
-                side = "long"
-                emoji = "📈"
-                label = "LONG"
                 print(f"  📈 LONG {symbol} {tf} {strat} size={size}")
                 if place_market_order(contract, size):
                     state[contract] = my_key
                     save_json(STATE_FILE, state)
                     place_sl_tp_orders(contract, "long", price - sl_dist, price + tp_dist, price, size)
                     send_telegram(
-                        f"{emoji} <b>{label}</b> {symbol} <code>{tf}</code>\n"
+                        f"📈 <b>LONG</b> {symbol} <code>{tf}</code>\n"
                         f"🎯 Strategy: <b>{strat}</b>\n"
                         f"💰 Entry: <code>{price:.6f}</code>\n"
                         f"📦 Size: <code>{size}</code>\n"
                         f"🛡️ SL: <code>{price - sl_dist:.6f}</code>\n"
                         f"🎯 TP: <code>{price + tp_dist:.6f}</code>\n"
                         f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
-                        f"🧪 <i>TESTNET — NO REAL MONEY</i>"
+                        f"🧪 <i>TESTNET</i>"
                     )
             elif signal == -1:
-                side = "short"
-                emoji = "📉"
-                label = "SHORT"
                 print(f"  📉 SHORT {symbol} {tf} {strat} size={size}")
                 if place_market_order(contract, -size):
                     state[contract] = my_key
                     save_json(STATE_FILE, state)
                     place_sl_tp_orders(contract, "short", price + sl_dist, price - tp_dist, price, size)
                     send_telegram(
-                        f"{emoji} <b>{label}</b> {symbol} <code>{tf}</code>\n"
+                        f"📉 <b>SHORT</b> {symbol} <code>{tf}</code>\n"
                         f"🎯 Strategy: <b>{strat}</b>\n"
                         f"💰 Entry: <code>{price:.6f}</code>\n"
                         f"📦 Size: <code>{size}</code>\n"
                         f"🛡️ SL: <code>{price + sl_dist:.6f}</code>\n"
                         f"🎯 TP: <code>{price - tp_dist:.6f}</code>\n"
                         f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
-                        f"🧪 <i>TESTNET — NO REAL MONEY</i>"
+                        f"🧪 <i>TESTNET</i>"
                     )
 
     else:
@@ -573,7 +550,7 @@ def process_config(cfg):
             return
 
         if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
-            print(f"  🔄 Reverse {symbol}, closing (owner: {owner})")
+            print(f"  🔄 Reverse {symbol}, closing")
             
             entry = pos_info["entry_price"]
             mark = pos_info["mark_price"]
@@ -584,9 +561,7 @@ def process_config(cfg):
             if open_time:
                 now = datetime.now(timezone.utc).timestamp()
                 diff_seconds = now - open_time
-                hours = int(diff_seconds // 3600)
-                minutes = int((diff_seconds % 3600) // 60)
-                duration_str = f"{hours}h {minutes}m"
+                duration_str = f"{int(diff_seconds // 3600)}h {int((diff_seconds % 3600) // 60)}m"
 
             close_position_market(contract, current_pos)
             
@@ -601,9 +576,7 @@ def process_config(cfg):
             send_telegram(
                 f"🚪 <b>CLOSED</b> {side_label} {symbol} <code>{tf}</code>\n"
                 f"🎯 Strategy: <b>{strat}</b>\n"
-                f"📦 Size: <code>{abs(current_pos)}</code>\n"
                 f"⏱ Open: <code>{duration_str}</code>\n"
-                f"💰 Entry: <code>{entry:.6f}</code> | Mark: <code>{mark:.6f}</code>\n"
                 f"📊 PnL: {pnl_emoji} <code>{pnl:+.4f} USDT</code>\n"
                 f"🧪 <i>TESTNET</i>"
             )
@@ -613,7 +586,7 @@ def process_config(cfg):
 # ============================================================
 def main():
     print("=" * 70)
-    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — SAFE MODE")
+    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — GOLDEN 10")
     print(f"🌐 HOST        : {GATE_HOST}")
     print(f"⚙️ LEVERAGE    : {LEVERAGE}x")
     print(f"📊 CONFIGS     : {len(BEST_CONFIGS)}")
@@ -623,17 +596,17 @@ def main():
         acc = futures_api.list_futures_accounts("usdt")
         equity = float(acc.total)
         available = float(acc.available) if hasattr(acc, "available") else 0.0
-        
-        print(f"\n✅ Connected. USDT equity: {equity:.2f} | Available: {available:.2f}\n")
+        print(f"\n✅ Connected. Equity: {equity:.2f} | Available: {available:.2f}\n")
     except Exception as e:
         print(f"❌ Connection failed: {e}")
+        send_telegram(f"❌ <b>Connection failed</b>\n<code>{e}</code>")
         sys.exit(1)
 
     _equity_cache["usdt"] = equity
     _available_cache["usdt"] = available
 
     send_telegram(
-        f"🧪 <b>Gate.io TestNet Scanner — Run Started</b>\n"
+        f"🧪 <b>Gate.io Scanner — Golden 10</b>\n"
         f"💰 Equity: <code>${equity:.2f}</code> | Free: <code>${available:.2f}</code>\n"
         f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
         f"📊 Configs: <code>{len(BEST_CONFIGS)}</code>\n"
