@@ -3,5 +3,7 @@
   "BTC_USDT": "BTC/USDC|15m|MACD",
   "HYPE_USDT": "HYPE/USD|15m|QQE",
   "GALA_USDT": "GALA/USDT|30m|Volume",
-  "DOT_USDT": "DOT/USDC|30m|MACD"
+  "DOT_USDT": "DOT/USDC|30m|MACD",
+  "BCH_USDT": "BCH/USDC|15m|Volume",
+  "AAVE_USDT": "AAVE/USDC|30m|Volume"
 }
