@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Detailed Close Report
-========================================================
-- Adds Entry/Exit price, PnL, and Duration to the "CLOSED" Telegram message
+Gate.io Futures TestNet Scanner — Stats Report + 4h Cooldown
+=============================================================
+- Calculates Win/Loss stats from the last 50 closed trades
 - Leverage forced to 10x
-- Cooldown: skips asset for 2 hours after a loss
-- Better Risk/Reward: SL = 2.5 ATR, TP = 7.5 ATR
+- Cooldown: 4 hours after a loss
+- Risk/Reward: SL = 2.5 ATR, TP = 7.5 ATR
 """
 
 import os
@@ -48,7 +48,7 @@ def send_telegram(text: str):
 if "testnet" not in GATE_HOST.lower():
     sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — SAFE MODE (10x LEVERAGE, 1:3 R:R)")
+print("🧪 GATE.IO TESTNET — SAFE MODE (10x LEVERAGE, 4H COOLDOWN)")
 
 # ============================================================
 # PARAMETERS
@@ -60,7 +60,7 @@ MAX_CONTRACTS     = 90_000
 LEVERAGE          = 10
 STATE_FILE        = "state.json"
 COOLDOWN_FILE     = "cooldown.json"
-COOLDOWN_HOURS    = 2
+COOLDOWN_HOURS    = 4        # ✅ افزایش به 4 ساعت
 
 # ============================================================
 # CONFIGS (53 TOTAL)
@@ -289,7 +289,6 @@ def get_equity():
     except Exception:
         return 0.0
 
-# ✅ تابع جدید برای دریافت اطلاعات کامل پوزیشن
 def get_position_info(contract):
     try:
         for p in futures_api.list_positions("usdt"):
@@ -365,7 +364,7 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
             print(f"  ⚠️ {kind} failed {contract}: {e}")
 
 # ============================================================
-# POSITION REPORT
+# REPORTS
 # ============================================================
 def send_positions_report():
     try:
@@ -412,6 +411,35 @@ def send_positions_report():
     lines.append(f"\n💰 <b>Total Unrealized PnL: {total_pnl:+.4f} USDT</b>")
     send_telegram("\n".join(lines))
 
+def send_trade_stats():
+    """گزارش آمار 50 معامله بسته شده آخر"""
+    try:
+        closed = futures_api.list_position_close("usdt", limit=50)
+    except Exception as e:
+        print(f"  [STATS] error: {e}")
+        return
+
+    if not closed:
+        send_telegram("📈 <b>Trade Stats:</b> No closed trades found yet.")
+        return
+
+    total = len(closed)
+    wins = sum(1 for p in closed if float(p.pnl) > 0)
+    losses = sum(1 for p in closed if float(p.pnl) < 0)
+    total_pnl = sum(float(p.pnl) for p in closed)
+
+    win_rate = (wins / total * 100) if total > 0 else 0
+
+    msg = (
+        f"📈 <b>Last {total} Closed Trades:</b>\n"
+        f"✅ Wins: <code>{wins}</code>\n"
+        f"❌ Losses: <code>{losses}</code>\n"
+        f"🎯 Win Rate: <code>{win_rate:.1f}%</code>\n"
+        f"💰 Total PnL: <code>{total_pnl:+.4f} USDT</code>\n"
+        f"🧪 <i>TESTNET</i>"
+    )
+    send_telegram(msg)
+
 # ============================================================
 # TRADING LOGIC
 # ============================================================
@@ -431,8 +459,6 @@ def process_config(cfg):
 
     state = load_json(STATE_FILE)
     cooldown = load_json(COOLDOWN_FILE)
-    
-    # ✅ دریافت اطلاعات کامل پوزیشن
     pos_info = get_position_info(contract)
     current_pos = pos_info["size"] if pos_info else 0
 
@@ -528,11 +554,9 @@ def process_config(cfg):
         if owner != my_key:
             return
 
-        # ✅ بستن با سیگنال مخالف و محاسبه سود/ضرر و مدت زمان
         if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
             print(f"  🔄 Reverse {symbol}, closing (owner: {owner})")
             
-            # استخراج اطلاعات قبل از بستن
             entry = pos_info["entry_price"]
             mark = pos_info["mark_price"]
             pnl = pos_info["unrealised_pnl"]
@@ -546,10 +570,8 @@ def process_config(cfg):
                 minutes = int((diff_seconds % 3600) // 60)
                 duration_str = f"{hours}h {minutes}m"
 
-            # بستن پوزیشن
             close_position_market(contract, current_pos)
             
-            # آپدیت فایل‌ها
             del state[contract]
             save_json(STATE_FILE, state)
             cooldown[contract] = time.time()
@@ -558,7 +580,6 @@ def process_config(cfg):
             side_label = "LONG" if current_pos > 0 else "SHORT"
             pnl_emoji = "✅" if pnl >= 0 else "❌"
 
-            # ✅ پیام تلگرام کامل با جزئیات
             send_telegram(
                 f"🚪 <b>CLOSED</b> {side_label} {symbol} <code>{tf}</code>\n"
                 f"🎯 Strategy: <b>{strat}</b>\n"
@@ -609,6 +630,9 @@ def main():
             print(f"  ❌ {cfg['symbol']} {cfg['timeframe']}: {e}")
 
     send_positions_report()
+    
+    # ✅ ارسال آمار برد و باخت در انتهای هر ران
+    send_trade_stats()
 
     print(f"\n✅ Run complete — TESTNET (no real money touched)")
 
