@@ -2,7 +2,6 @@
   "DOGE_USDT": "DOGE/USDT|30m|MACD",
   "LINK_USDT": "LINK/BTC|30m|Supertrend",
   "BTC_USDT": "BTC/USDC|15m|MACD",
-  "AVAX_USDT": "AVAX/USDT|30m|MACD",
   "ETH_USDT": "ETH/USDC|30m|Supertrend",
   "FIL_USDT": "FIL/USD|15m|Volume",
   "AAVE_USDT": "AAVE/USDC|30m|Volume",
