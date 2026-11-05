@@ -1,3 +1,5 @@
 {
-  "BCH_USDT": "BCH/USDC|15m|Volume"
+  "BCH_USDT": "BCH/USDC|15m|Volume",
+  "AVAX_USDT": "AVAX/USDC|15m|Volume",
+  "SHIB_USDT": "SHIB/USDT|15m|QQE"
 }
