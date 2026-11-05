@@ -1,10 +1,7 @@
 {
-  "ETH_USDT": "ETH/BTC|30m|QQE",
   "BTC_USDT": "BTC/USDC|15m|MACD",
   "HYPE_USDT": "HYPE/USD|15m|QQE",
-  "DOT_USDT": "DOT/USDC|30m|MACD",
   "AAVE_USDT": "AAVE/USDC|30m|Volume",
   "FIL_USDT": "FIL/USD|15m|Volume",
-  "ADA_USDT": "ADA/USDT|30m|Supertrend",
-  "SOL_USDT": "SOL/USDT|15m|Supertrend"
+  "ADA_USDT": "ADA/USDT|30m|Supertrend"
 }
