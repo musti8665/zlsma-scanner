@@ -1,9 +1,7 @@
 {
   "ETH_USDT": "ETH/BTC|30m|QQE",
   "BTC_USDT": "BTC/USDC|15m|MACD",
-  "SHIB_USDT": "SHIB/USDT|15m|QQE",
   "HYPE_USDT": "HYPE/USD|15m|QQE",
   "GALA_USDT": "GALA/USDT|30m|Volume",
-  "BCH_USDT": "BCH/USDC|15m|Volume",
   "DOT_USDT": "DOT/USDC|30m|MACD"
 }
