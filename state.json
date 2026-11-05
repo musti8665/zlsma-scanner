@@ -5,6 +5,5 @@
   "FIL_USDT": "FIL/USD|15m|Volume",
   "ADA_USDT": "ADA/USDT|30m|Supertrend",
   "KAS_USDT": "KAS/USDT|30m|Volume",
-  "ETH_USDT": "ETH/USDC|30m|Supertrend",
-  "LTC_USDT": "LTC/USDT|5m|QQE"
+  "ETH_USDT": "ETH/USDC|30m|Supertrend"
 }
