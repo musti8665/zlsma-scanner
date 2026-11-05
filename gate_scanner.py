@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Stats Report + 4h Cooldown
-=============================================================
-- Calculates Win/Loss stats from the last 50 closed trades
-- Leverage forced to 10x
-- Cooldown: 4 hours after a loss
-- Risk/Reward: SL = 2.5 ATR, TP = 7.5 ATR
+Gate.io Futures TestNet Scanner — Available Margin Check
+========================================================
+- Checks Free Margin before entering a trade (fixes INSUFFICIENT_AVAILABLE)
+- Calculates Win/Loss stats for the last 50 trades
+- Leverage: 10x, Cooldown: 4 hours after loss
 """
 
 import os
@@ -60,7 +59,7 @@ MAX_CONTRACTS     = 90_000
 LEVERAGE          = 10
 STATE_FILE        = "state.json"
 COOLDOWN_FILE     = "cooldown.json"
-COOLDOWN_HOURS    = 4        # ✅ افزایش به 4 ساعت
+COOLDOWN_HOURS    = 4
 
 # ============================================================
 # CONFIGS (53 TOTAL)
@@ -130,6 +129,7 @@ futures_api = FuturesApi(ApiClient(config))
 _contracts_cache: dict = {}
 _specs_cache:     dict = {}
 _equity_cache:    dict = {}
+_available_cache: dict = {}
 
 def load_json(file_path):
     if os.path.exists(file_path):
@@ -285,7 +285,16 @@ def resolve_contract(symbol):
 
 def get_equity():
     try:
-        return float(futures_api.list_futures_accounts("usdt").total)
+        acc = futures_api.list_futures_accounts("usdt")
+        return float(acc.total)
+    except Exception:
+        return 0.0
+
+def get_available():
+    """دریافت موجودی آزاد (Free Margin)"""
+    try:
+        acc = futures_api.list_futures_accounts("usdt")
+        return float(acc.available) if hasattr(acc, "available") else 0.0
     except Exception:
         return 0.0
 
@@ -323,7 +332,9 @@ def place_market_order(contract, size):
     except Exception as e:
         error_msg = str(e)
         if "MARKET_PRICE_TOO_DEVIATED" in error_msg or "slip ratio" in error_msg.lower():
-            print(f"  ⏸️ Skipped {contract}: High slippage detected by exchange.")
+            print(f"  ⏸️ Skipped {contract}: High slippage detected.")
+        elif "INSUFFICIENT_AVAILABLE" in error_msg:
+            print(f"  ⏸️ Skipped {contract}: Insufficient margin.")
         else:
             print(f"  ❌ Market failed {contract}: {e}")
             send_telegram(f"❌ <b>Market failed</b>\n{contract}\n<code>{e}</code>")
@@ -412,7 +423,6 @@ def send_positions_report():
     send_telegram("\n".join(lines))
 
 def send_trade_stats():
-    """گزارش آمار 50 معامله بسته شده آخر"""
     try:
         closed = futures_api.list_position_close("usdt", limit=50)
     except Exception as e:
@@ -501,6 +511,14 @@ def process_config(cfg):
             size = max(specs["order_size_min"], min(raw_size, order_size_max, MAX_CONTRACTS))
 
             if size <= 0:
+                return
+
+            # ✅ محاسبه مارجین مورد نیاز و چک کردن موجودی آزاد
+            required_margin = (size * multiplier * price) / LEVERAGE
+            available = _available_cache.get("usdt", 0.0)
+            
+            if required_margin > available:
+                print(f"  ⏸️ {symbol}: Need {required_margin:.2f} margin, but only {available:.2f} available. Skipping.")
                 return
 
             set_leverage(contract, LEVERAGE)
@@ -604,16 +622,19 @@ def main():
     try:
         acc = futures_api.list_futures_accounts("usdt")
         equity = float(acc.total)
-        print(f"\n✅ Connected. USDT equity: {equity:.2f}\n")
+        available = float(acc.available) if hasattr(acc, "available") else 0.0
+        
+        print(f"\n✅ Connected. USDT equity: {equity:.2f} | Available: {available:.2f}\n")
     except Exception as e:
         print(f"❌ Connection failed: {e}")
         sys.exit(1)
 
     _equity_cache["usdt"] = equity
+    _available_cache["usdt"] = available
 
     send_telegram(
         f"🧪 <b>Gate.io TestNet Scanner — Run Started</b>\n"
-        f"💰 Equity: <code>${equity:.2f} USDT</code>\n"
+        f"💰 Equity: <code>${equity:.2f}</code> | Free: <code>${available:.2f}</code>\n"
         f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
         f"📊 Configs: <code>{len(BEST_CONFIGS)}</code>\n"
         f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
@@ -630,8 +651,6 @@ def main():
             print(f"  ❌ {cfg['symbol']} {cfg['timeframe']}: {e}")
 
     send_positions_report()
-    
-    # ✅ ارسال آمار برد و باخت در انتهای هر ران
     send_trade_stats()
 
     print(f"\n✅ Run complete — TESTNET (no real money touched)")
