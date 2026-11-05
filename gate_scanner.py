@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Ultimate Golden 10
-====================================================
-- Uses the 10 verified best configs (ENA, SUI, KAS, AVAX, ETH, DOT, SOL)
+Gate.io Futures TestNet Scanner — Ultimate 12 Final
+===================================================
+- Uses the 12 verified best configs from over 100 backtests
 - Leverage: 10x, Cooldown: 4 hours, Risk: 2% per trade
-- Pure ATR Exit: SL = 2.5 ATR, TP = 7.5 ATR (1:3 R:R)
-- Prevents INSUFFICIENT_AVAILABLE by checking free margin
+- Pure ATR Exit: SL = 2.5 ATR, TP = 7.5 ATR
 - Auto-creates state.json and cooldown.json if missing
+- Sends detailed Telegram reports
 """
 
 import os
@@ -49,7 +49,7 @@ def send_telegram(text: str):
 if "testnet" not in GATE_HOST.lower():
     sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — ULTIMATE GOLDEN 10 CONFIGS")
+print("🧪 GATE.IO TESTNET — ULTIMATE 12 FINAL")
 
 # ============================================================
 # PARAMETERS
@@ -64,37 +64,25 @@ COOLDOWN_FILE     = "cooldown.json"
 COOLDOWN_HOURS    = 4
 
 # ============================================================
-# ✅ ULTIMATE GOLDEN 10 CONFIGS (Dual-Backtest Verified)
+# ✅ ULTIMATE 12 CONFIGS (Verified by Deep Backtests)
 # ============================================================
 BEST_CONFIGS = [
-    # 1. برنده جدید (بیشترین شارپ) - ENA
+    # --- New Top Winners (UNI, LTC, BNB) ---
+    {"symbol": "UNI/USDT",  "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
+    {"symbol": "LTC/USDT",  "timeframe": "5m",  "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 2.5}},
+    {"symbol": "BNB/USDT",  "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 2.5}},
+
+    # --- Previous Top Winners (ENA, SUI, KAS) ---
     {"symbol": "ENA/USDT",  "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
-    
-    # 2. برنده جدید (بیشترین بازده ۳۰ دقیقه) - SUI
     {"symbol": "SUI/USDT",  "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 4.236}},
-    
-    # 3. برنده جدید (بهترین MACD) - KAS
+    {"symbol": "SUI/USDT",  "timeframe": "5m",  "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
+    {"symbol": "KAS/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
     {"symbol": "KAS/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
     
-    # 4. برنده جدید (بهترین Volume) - KAS
-    {"symbol": "KAS/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.5, "ma_period": 50}},
-
-    # 5. برنده جدید (بهترین 5m جدید) - SUI
-    {"symbol": "SUI/USDT",  "timeframe": "5m",  "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
-    
-    # 6. قهرمان قبلی (بیشترین شارپ اولیه) - AVAX
+    # --- Original Top Winners (AVAX, ETH, SOL) ---
     {"symbol": "AVAX/USDT", "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-    
-    # 7. برنده قبلی (بازده بالا) - AVAX
     {"symbol": "AVAX/USD",  "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
-    
-    # 8. استراتژی پایدار ETH
     {"symbol": "ETH/USDC",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
-    
-    # 9. استراتژی پایدار DOT (از تست بدون ATR)
-    {"symbol": "DOT/USDC",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-    
-    # 10. استراتژی پایدار SOL
     {"symbol": "SOL/USDT",  "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
 ]
 
@@ -586,7 +574,7 @@ def process_config(cfg):
 # ============================================================
 def main():
     print("=" * 70)
-    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — GOLDEN 10")
+    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — ULTIMATE 12")
     print(f"🌐 HOST        : {GATE_HOST}")
     print(f"⚙️ LEVERAGE    : {LEVERAGE}x")
     print(f"📊 CONFIGS     : {len(BEST_CONFIGS)}")
@@ -606,7 +594,7 @@ def main():
     _available_cache["usdt"] = available
 
     send_telegram(
-        f"🧪 <b>Gate.io Scanner — Golden 10</b>\n"
+        f"🧪 <b>Gate.io Scanner — Ultimate 12</b>\n"
         f"💰 Equity: <code>${equity:.2f}</code> | Free: <code>${available:.2f}</code>\n"
         f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
         f"📊 Configs: <code>{len(BEST_CONFIGS)}</code>\n"
