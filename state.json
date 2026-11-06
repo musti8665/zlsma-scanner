@@ -9,5 +9,6 @@
   "SUI_USDT": "SUI/USDT|30m|QQE",
   "KAS_USDT": "KAS/USDT|30m|Volume",
   "ENA_USDT": "ENA/USDT|15m|Supertrend",
-  "ETH_USDT": "ETH/USDC|30m|Supertrend"
+  "ETH_USDT": "ETH/USDC|30m|Supertrend",
+  "BNB_USDT": "BNB/USDT|30m|QQE"
 }
