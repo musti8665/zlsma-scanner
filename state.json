@@ -7,7 +7,5 @@
   "ETH_USDT": "ETH/USDC|30m|Supertrend",
   "ENA_USDT": "ENA/USDT|15m|Supertrend",
   "KAS_USDT": "KAS/USDT|30m|Volume",
-  "LTC_USDT": "LTC/USDT|5m|QQE",
-  "BNB_USDT": "BNB/USDT|30m|QQE",
-  "AVAX_USDT": "AVAX/USD|15m|Volume"
+  "BNB_USDT": "BNB/USDT|30m|QQE"
 }
