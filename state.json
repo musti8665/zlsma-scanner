@@ -5,6 +5,5 @@
   "FIL_USDT": "FIL/USD|15m|Volume",
   "ADA_USDT": "ADA/USDT|30m|Supertrend",
   "ETH_USDT": "ETH/USDC|30m|Supertrend",
-  "LTC_USDT": "LTC/USDT|5m|QQE",
-  "AVAX_USDT": "AVAX/USDT|5m|MACD"
+  "LTC_USDT": "LTC/USDT|5m|QQE"
 }
