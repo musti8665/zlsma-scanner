@@ -8,5 +8,6 @@
   "ENA_USDT": "ENA/USDT|15m|Supertrend",
   "KAS_USDT": "KAS/USDT|30m|Volume",
   "BNB_USDT": "BNB/USDT|30m|QQE",
-  "UNI_USDT": "UNI/USDT|5m|MACD"
+  "UNI_USDT": "UNI/USDT|5m|MACD",
+  "AVAX_USDT": "AVAX/USD|15m|Volume"
 }
