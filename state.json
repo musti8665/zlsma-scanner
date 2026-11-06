@@ -6,6 +6,5 @@
   "ADA_USDT": "ADA/USDT|30m|Supertrend",
   "ETH_USDT": "ETH/USDC|30m|Supertrend",
   "LTC_USDT": "LTC/USDT|5m|QQE",
-  "AVAX_USDT": "AVAX/USDT|5m|MACD",
-  "UNI_USDT": "UNI/USDT|5m|MACD"
+  "AVAX_USDT": "AVAX/USDT|5m|MACD"
 }
