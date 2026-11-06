@@ -4,6 +4,5 @@
   "AAVE_USDT": "AAVE/USDC|30m|Volume",
   "FIL_USDT": "FIL/USD|15m|Volume",
   "ADA_USDT": "ADA/USDT|30m|Supertrend",
-  "ETH_USDT": "ETH/USDC|30m|Supertrend",
-  "LTC_USDT": "LTC/USDT|5m|QQE"
+  "ETH_USDT": "ETH/USDC|30m|Supertrend"
 }
