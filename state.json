@@ -8,5 +8,6 @@
   "BNB_USDT": "BNB/USDT|30m|QQE",
   "ENA_USDT": "ENA/USDT|15m|Supertrend",
   "KAS_USDT": "KAS/USDT|30m|Volume",
-  "SUI_USDT": "SUI/USDT|30m|QQE"
+  "SUI_USDT": "SUI/USDT|30m|QQE",
+  "UNI_USDT": "UNI/USDT|5m|MACD"
 }
