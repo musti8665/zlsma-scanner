@@ -4,5 +4,6 @@
   "AAVE_USDT": "AAVE/USDC|30m|Volume",
   "FIL_USDT": "FIL/USD|15m|Volume",
   "ADA_USDT": "ADA/USDT|30m|Supertrend",
-  "KAS_USDT": "KAS/USDT|30m|MACD"
+  "KAS_USDT": "KAS/USDT|30m|MACD",
+  "SUI_USDT": "SUI/USDT|30m|QQE"
 }
