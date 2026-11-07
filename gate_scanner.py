@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Ultimate 12 Final
-===================================================
-- Uses the 12 verified best configs from over 100 backtests
+Gate.io Futures TestNet Scanner — Ultimate 12 (TP Bug Fixed)
+============================================================
+- Fixed the TP calculation bug (now TP is exactly 7.5 ATR, not 18.75)
 - Leverage: 10x, Cooldown: 4 hours, Risk: 2% per trade
-- Pure ATR Exit: SL = 2.5 ATR, TP = 7.5 ATR
 - Auto-creates state.json and cooldown.json if missing
 - Sends detailed Telegram reports
 """
@@ -49,14 +48,14 @@ def send_telegram(text: str):
 if "testnet" not in GATE_HOST.lower():
     sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — ULTIMATE 12 FINAL")
+print("🧪 GATE.IO TESTNET — ULTIMATE 12 (TP BUG FIXED)")
 
 # ============================================================
 # PARAMETERS
 # ============================================================
 RISK_PCT          = 0.02
-ATR_MULT_SL       = 2.5
-ATR_MULT_TP       = 7.5
+ATR_MULT_SL       = 2.5   # حد ضرر: 2.5 ATR
+ATR_MULT_TP       = 7.5   # حد سود: 7.5 ATR (نسبت 1 به 3)
 MAX_CONTRACTS     = 90_000
 LEVERAGE          = 10
 STATE_FILE        = "state.json"
@@ -67,19 +66,14 @@ COOLDOWN_HOURS    = 4
 # ✅ ULTIMATE 12 CONFIGS (Verified by Deep Backtests)
 # ============================================================
 BEST_CONFIGS = [
-    # --- New Top Winners (UNI, LTC, BNB) ---
     {"symbol": "UNI/USDT",  "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
     {"symbol": "LTC/USDT",  "timeframe": "5m",  "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 2.5}},
     {"symbol": "BNB/USDT",  "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 2.5}},
-
-    # --- Previous Top Winners (ENA, SUI, KAS) ---
     {"symbol": "ENA/USDT",  "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
     {"symbol": "SUI/USDT",  "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 4.236}},
     {"symbol": "SUI/USDT",  "timeframe": "5m",  "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
     {"symbol": "KAS/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
     {"symbol": "KAS/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    
-    # --- Original Top Winners (AVAX, ETH, SOL) ---
     {"symbol": "AVAX/USDT", "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
     {"symbol": "AVAX/USD",  "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
     {"symbol": "ETH/USDC",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
@@ -471,8 +465,12 @@ def process_config(cfg):
 
             specs = get_contract_specs(contract)
             multiplier = specs["quanto_multiplier"]
+            
+            # ✅ باگ اصلاح شد:
+            # sl_dist = 2.5 * ATR
+            # tp_dist = 7.5 * ATR (نه 2.5 * 7.5)
             sl_dist = atr_val * ATR_MULT_SL
-            tp_dist = sl_dist * ATR_MULT_TP
+            tp_dist = atr_val * ATR_MULT_TP  
 
             equity = _equity_cache.get("usdt", 0.0)
             if equity <= 0:
@@ -574,7 +572,7 @@ def process_config(cfg):
 # ============================================================
 def main():
     print("=" * 70)
-    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — ULTIMATE 12")
+    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — ULTIMATE 12 (FIXED)")
     print(f"🌐 HOST        : {GATE_HOST}")
     print(f"⚙️ LEVERAGE    : {LEVERAGE}x")
     print(f"📊 CONFIGS     : {len(BEST_CONFIGS)}")
@@ -594,7 +592,7 @@ def main():
     _available_cache["usdt"] = available
 
     send_telegram(
-        f"🧪 <b>Gate.io Scanner — Ultimate 12</b>\n"
+        f"🧪 <b>Gate.io Scanner — ULTIMATE 12 (TP Fixed)</b>\n"
         f"💰 Equity: <code>${equity:.2f}</code> | Free: <code>${available:.2f}</code>\n"
         f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
         f"📊 Configs: <code>{len(BEST_CONFIGS)}</code>\n"
