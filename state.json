@@ -5,5 +5,6 @@
   "FIL_USDT": "FIL/USD|15m|Volume",
   "ADA_USDT": "ADA/USDT|30m|Supertrend",
   "KAS_USDT": "KAS/USDT|30m|Volume",
-  "SOL_USDT": "SOL/USDT|15m|Supertrend"
+  "SOL_USDT": "SOL/USDT|15m|Supertrend",
+  "SUI_USDT": "SUI/USDT|30m|QQE"
 }
