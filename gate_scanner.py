@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — Ultimate 12 (TP Bug Fixed)
-============================================================
-- Fixed the TP calculation bug (now TP is exactly 7.5 ATR, not 18.75)
+Gate.io Futures TestNet Scanner — THE GOLDEN 10
+===============================================
+- Uses the ultimate 10 configs from 40-asset, 60-day backtest (All 30m).
 - Leverage: 10x, Cooldown: 4 hours, Risk: 2% per trade
-- Auto-creates state.json and cooldown.json if missing
-- Sends detailed Telegram reports
+- Includes: HMA_20, HMA_50, WMA_50, TSI_SENS filters
+- Fixed TP Bug: TP is exactly 7.5 ATR (1:3 R:R)
 """
 
 import os
@@ -48,36 +48,35 @@ def send_telegram(text: str):
 if "testnet" not in GATE_HOST.lower():
     sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — ULTIMATE 12 (TP BUG FIXED)")
+print("🧪 GATE.IO TESTNET — THE GOLDEN 10")
 
 # ============================================================
 # PARAMETERS
 # ============================================================
 RISK_PCT          = 0.02
-ATR_MULT_SL       = 2.5   # حد ضرر: 2.5 ATR
-ATR_MULT_TP       = 7.5   # حد سود: 7.5 ATR (نسبت 1 به 3)
+ATR_MULT_SL       = 2.5
+ATR_MULT_TP       = 7.5  # ✅ TP اصلاح شده: 7.5 ATR
 MAX_CONTRACTS     = 90_000
 LEVERAGE          = 10
 STATE_FILE        = "state.json"
 COOLDOWN_FILE     = "cooldown.json"
 COOLDOWN_HOURS    = 4
+MAX_MARGIN_PCT    = 0.20 # ✅ حداکثر 20% از موجودی برای هر معامله
 
 # ============================================================
-# ✅ ULTIMATE 12 CONFIGS (Verified by Deep Backtests)
+# ✅ THE GOLDEN 10 CONFIGS
 # ============================================================
 BEST_CONFIGS = [
-    {"symbol": "UNI/USDT",  "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}},
-    {"symbol": "LTC/USDT",  "timeframe": "5m",  "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 2.5}},
-    {"symbol": "BNB/USDT",  "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 2.5}},
-    {"symbol": "ENA/USDT",  "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
-    {"symbol": "SUI/USDT",  "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 10, "smooth": 5, "factor": 4.236}},
-    {"symbol": "SUI/USDT",  "timeframe": "5m",  "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
-    {"symbol": "KAS/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
-    {"symbol": "KAS/USDT",  "timeframe": "30m", "strategy": "MACD",       "params": {"fast": 8, "slow": 26, "signal": 9}},
-    {"symbol": "AVAX/USDT", "timeframe": "5m",  "strategy": "MACD",       "params": {"fast": 8,  "slow": 26, "signal": 9}},
-    {"symbol": "AVAX/USD",  "timeframe": "15m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 50}},
-    {"symbol": "ETH/USDC",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}},
-    {"symbol": "SOL/USDT",  "timeframe": "15m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}},
+    {"symbol": "FIL/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}, "filter": "HMA_20"},
+    {"symbol": "FLOKI/USDT", "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}, "filter": "TSI_SENS"},
+    {"symbol": "HBAR/USDT",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}, "filter": "TSI_SENS"},
+    {"symbol": "UNI/USDT",   "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}, "filter": "WMA_50"},
+    {"symbol": "APT/USDT",   "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}, "filter": "TSI_SENS"},
+    {"symbol": "DOT/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}, "filter": "HMA_50"},
+    {"symbol": "ADA/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 3, "factor": 4.236}, "filter": "HMA_20"},
+    {"symbol": "INJ/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 2.5}, "filter": "HMA_20"},
+    {"symbol": "XRP/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 2.5}, "filter": "HMA_20"},
+    {"symbol": "BONK/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 20}, "filter": "HMA_20"},
 ]
 
 # ============================================================
@@ -91,41 +90,30 @@ _specs_cache:     dict = {}
 _equity_cache:    dict = {}
 _available_cache: dict = {}
 _candles_cache:   dict = {}
-_positions_cache: dict = {}
 
-# ✅ ساخت خودکار فایل‌های حافظه در صورت نبودن
 if not os.path.exists(STATE_FILE):
-    with open(STATE_FILE, "w") as f:
-        json.dump({}, f)
+    with open(STATE_FILE, "w") as f: json.dump({}, f)
 if not os.path.exists(COOLDOWN_FILE):
-    with open(COOLDOWN_FILE, "w") as f:
-        json.dump({}, f)
+    with open(COOLDOWN_FILE, "w") as f: json.dump({}, f)
 
 def load_json(file_path):
     try:
-        with open(file_path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+        with open(file_path, "r") as f: return json.load(f)
+    except Exception: return {}
 
 def save_json(file_path, data):
     try:
-        with open(file_path, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        print(f"  ⚠️ Failed to save {file_path}: {e}")
+        with open(file_path, "w") as f: json.dump(data, f, indent=2)
+    except Exception as e: print(f"  ⚠️ Failed to save {file_path}: {e}")
 
 def get_contracts():
     if "usdt" not in _contracts_cache:
-        try:
-            _contracts_cache["usdt"] = futures_api.list_futures_contracts("usdt")
-        except Exception:
-            _contracts_cache["usdt"] = []
+        try: _contracts_cache["usdt"] = futures_api.list_futures_contracts("usdt")
+        except Exception: _contracts_cache["usdt"] = []
     return _contracts_cache["usdt"]
 
 def get_contract_specs(contract):
-    if contract in _specs_cache:
-        return _specs_cache[contract]
+    if contract in _specs_cache: return _specs_cache[contract]
     for c in get_contracts():
         if c.name == contract:
             spec = {
@@ -195,9 +183,30 @@ def qqe(df, rsi_p=14, smooth=5, factor=4.236):
         else:                   trend[i] = trend[i - 1]
     return pd.Series(trend, index=df.index)
 
-def generate_signal(df, strat, params):
-    if len(df) < 2: return 0
+def wma(series, period):
+    weights = np.arange(1, period + 1)
+    return series.rolling(period).apply(lambda x: np.dot(x, weights) / weights.sum(), raw=True)
+
+def hma(series, period):
+    half_length = int(period / 2)
+    sqrt_length = int(np.sqrt(period))
+    wma_half = wma(series, half_length)
+    wma_full = wma(series, period)
+    diff = 2 * wma_half - wma_full
+    return wma(diff, sqrt_length)
+
+def tsi(series, long=25, short=13):
+    momentum = series.diff()
+    abs_momentum = momentum.abs()
+    smooth_mom = momentum.ewm(span=long, adjust=False).mean().ewm(span=short, adjust=False).mean()
+    smooth_abs = abs_momentum.ewm(span=long, adjust=False).mean().ewm(span=short, adjust=False).mean()
+    return 100 * (smooth_mom / smooth_abs)
+
+def generate_signal_with_filters(df, strat, params, filter_name):
+    if len(df) < 60: return 0
     close = df["close"]
+    raw_sig = 0
+    
     if strat == "MACD":
         fast = close.ewm(span=params["fast"], adjust=False).mean()
         slow = close.ewm(span=params["slow"], adjust=False).mean()
@@ -205,38 +214,64 @@ def generate_signal(df, strat, params):
         s = macd.ewm(span=params["signal"], adjust=False).mean()
         hist = macd - s
         st = supertrend(df, 10, 3.0)
-        if hist.iloc[-1] > 0 and hist.iloc[-2] <= 0 and st.iloc[-1] == 1:  return 1
-        if hist.iloc[-1] < 0 and hist.iloc[-2] >= 0 and st.iloc[-1] == -1: return -1
+        if hist.iloc[-1] > 0 and hist.iloc[-2] <= 0 and st.iloc[-1] == 1:  raw_sig = 1
+        if hist.iloc[-1] < 0 and hist.iloc[-2] >= 0 and st.iloc[-1] == -1: raw_sig = -1
+        
     elif strat == "QQE":
         q = qqe(df, params["rsi_period"], params["smooth"], params["factor"])
-        if q.iloc[-1] == 1  and q.iloc[-2] == -1: return 1
-        if q.iloc[-1] == -1 and q.iloc[-2] == 1:  return -1
+        if q.iloc[-1] == 1  and q.iloc[-2] == -1: raw_sig = 1
+        if q.iloc[-1] == -1 and q.iloc[-2] == 1:  raw_sig = -1
+        
     elif strat == "Volume":
         vma = df["volume"].rolling(params["ma_period"]).mean()
-        if len(vma) < 2 or pd.isna(vma.iloc[-1]): return 0
-        vol_ok = df["volume"].iloc[-1] > params["vol_mult"] * vma.iloc[-1]
-        if vol_ok and close.iloc[-1] > close.iloc[-2]: return 1
-        if vol_ok and close.iloc[-1] < close.iloc[-2]: return -1
+        if len(vma) >= 2 and not pd.isna(vma.iloc[-1]):
+            vol_ok = df["volume"].iloc[-1] > params["vol_mult"] * vma.iloc[-1]
+            if vol_ok and close.iloc[-1] > close.iloc[-2]: raw_sig = 1
+            if vol_ok and close.iloc[-1] < close.iloc[-2]: raw_sig = -1
+            
     elif strat == "Supertrend":
         st = supertrend(df, params["period"], params["mult"])
-        if st.iloc[-1] == 1  and st.iloc[-2] == -1: return 1
-        if st.iloc[-1] == -1 and st.iloc[-2] == 1:  return -1
-    return 0
+        if st.iloc[-1] == 1  and st.iloc[-2] == -1: raw_sig = 1
+        if st.iloc[-1] == -1 and st.iloc[-2] == 1:  raw_sig = -1
+
+    if raw_sig == 0 or filter_name == "NONE": return raw_sig
+
+    is_bull = False
+    is_bear = False
+
+    if filter_name == "HMA_20":
+        h = hma(close, 20).iloc[-1]
+        is_bull, is_bear = (close.iloc[-1] > h), (close.iloc[-1] < h)
+        
+    elif filter_name == "HMA_50":
+        h = hma(close, 50).iloc[-1]
+        is_bull, is_bear = (close.iloc[-1] > h), (close.iloc[-1] < h)
+        
+    elif filter_name == "WMA_50":
+        w = wma(close, 50).iloc[-1]
+        is_bull, is_bear = (close.iloc[-1] > w), (close.iloc[-1] < w)
+        
+    elif filter_name == "TSI_SENS":
+        t = tsi(close, long=25, short=13).iloc[-1]
+        is_bull, is_bear = (t > 0), (t < 0)
+
+    if raw_sig == 1 and not is_bull: return 0
+    if raw_sig == -1 and not is_bear: return 0
+    
+    return raw_sig
 
 # ============================================================
 # DATA & ACCOUNT
 # ============================================================
 def fetch_gate_candles(contract, timeframe, limit=200):
     cache_key = (contract, timeframe)
-    if cache_key in _candles_cache:
-        return _candles_cache[cache_key]
-
+    if cache_key in _candles_cache: return _candles_cache[cache_key]
     url = f"{GATE_HOST}/futures/usdt/candlesticks"
     try:
         r = requests.get(url, params={"contract": contract, "interval": timeframe, "limit": limit}, timeout=15)
         if r.status_code != 200: return None
         data = r.json()
-        if not data or len(data) < 50: return None
+        if not data or len(data) < 100: return None
         df = pd.DataFrame(data)
         df["t"] = pd.to_datetime(df["t"].astype(int), unit="s", utc=True)
         df = df.set_index("t").sort_index()
@@ -252,22 +287,18 @@ def resolve_contract(symbol):
     base = symbol.split("/")[0]
     alt = f"{base}_USDT"
     for c in get_contracts():
-        if c.name == alt:
-            return alt
+        if c.name == alt: return alt
     return None
 
 def get_equity():
-    try:
-        return float(futures_api.list_futures_accounts("usdt").total)
-    except Exception:
-        return 0.0
+    try: return float(futures_api.list_futures_accounts("usdt").total)
+    except Exception: return 0.0
 
 def get_available():
     try:
         acc = futures_api.list_futures_accounts("usdt")
         return float(acc.available) if hasattr(acc, "available") else 0.0
-    except Exception:
-        return 0.0
+    except Exception: return 0.0
 
 def get_position_info(contract):
     try:
@@ -280,15 +311,12 @@ def get_position_info(contract):
                     "unrealised_pnl": float(p.unrealised_pnl),
                     "open_time": int(p.open_time) if hasattr(p, "open_time") and p.open_time else None
                 }
-    except Exception:
-        pass
+    except Exception: pass
     return None
 
 def set_leverage(contract, leverage):
-    try:
-        futures_api.update_position_leverage("usdt", contract, str(leverage))
-    except Exception:
-        pass
+    try: futures_api.update_position_leverage("usdt", contract, str(leverage))
+    except Exception: pass
 
 # ============================================================
 # ORDERS
@@ -297,28 +325,25 @@ def place_market_order(contract, size):
     order = FuturesOrder(contract=contract, size=size, price="0", tif="ioc", reduce_only=False)
     try:
         futures_api.create_futures_order("usdt", order)
-        side_label = "LONG" if size > 0 else "SHORT"
-        print(f"  🧪 [DEMO] {side_label} {contract} size={abs(size)}")
+        print(f"  🧪 [DEMO] {'LONG' if size > 0 else 'SHORT'} {contract} size={abs(size)}")
         return True
     except Exception as e:
         error_msg = str(e)
-        if "MARKET_PRICE_TOO_DEVIATED" in error_msg or "slip ratio" in error_msg.lower():
+        if "MARKET_PRICE_TOO_DEVIATED" in error_msg:
             print(f"  ⏸️ Skipped {contract}: High slippage.")
         elif "INSUFFICIENT_AVAILABLE" in error_msg:
             print(f"  ⏸️ Skipped {contract}: Insufficient margin.")
         else:
             print(f"  ❌ Market failed {contract}: {e}")
-            send_telegram(f"❌ <b>Market failed</b>\n{contract}\n<code>{e}</code>")
         return False
 
 def close_position_market(contract, current_size):
     order = FuturesOrder(contract=contract, size=0, price="0", tif="ioc", reduce_only=True, close=True)
     try:
         futures_api.create_futures_order("usdt", order)
-        print(f"  🧪 [DEMO CLOSE] {contract} (size=0, close=true)")
+        print(f"  🧪 [DEMO CLOSE] {contract}")
     except Exception as e:
         print(f"  ❌ Close failed {contract}: {e}")
-        send_telegram(f"❌ <b>Close failed</b>\n{contract}\n<code>{e}</code>")
 
 def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
     specs = get_contract_specs(contract)
@@ -326,22 +351,19 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
     sl_price = round_to_tick(sl_price, tick)
     tp_price = round_to_tick(tp_price, tick)
 
-    sl_price_str = f"{sl_price:.10f}"
-    tp_price_str = f"{tp_price:.10f}"
-
     sl_rule = 2 if side == "long" else 1
     tp_rule = 1 if side == "long" else 2
     order_type = "close-long-position" if side == "long" else "close-short-position"
 
-    for kind, price_str, rule in [("SL", sl_price_str, sl_rule), ("TP", tp_price_str, tp_rule)]:
+    for kind, price, rule in [("SL", sl_price, sl_rule), ("TP", tp_price, tp_rule)]:
         order = FuturesPriceTriggeredOrder(
             initial=FuturesInitialOrder(contract=contract, size=0, price="0", tif="ioc", reduce_only=True, close=True),
-            trigger=FuturesPriceTrigger(strategy_type=0, price_type=0, price=price_str, rule=rule, expiration=86400),
+            trigger=FuturesPriceTrigger(strategy_type=0, price_type=0, price=f"{price:.10f}", rule=rule, expiration=86400),
             order_type=order_type,
         )
         try:
             futures_api.create_price_triggered_order("usdt", order)
-            print(f"  🧪 [DEMO {kind}] {contract} @ {price_str}")
+            print(f"  🧪 [DEMO {kind}] {contract} @ {price:.6f}")
         except Exception as e:
             print(f"  ⚠️ {kind} failed {contract}: {e}")
 
@@ -349,10 +371,8 @@ def place_sl_tp_orders(contract, side, sl_price, tp_price, entry_price, size):
 # REPORTS
 # ============================================================
 def send_positions_report():
-    try:
-        positions = futures_api.list_positions("usdt")
-    except Exception:
-        return
+    try: positions = futures_api.list_positions("usdt")
+    except Exception: return
 
     active = [p for p in positions if int(p.size) != 0]
     if not active:
@@ -377,9 +397,7 @@ def send_positions_report():
         duration_str = "N/A"
         if open_time:
             diff_seconds = now - open_time
-            hours = int(diff_seconds // 3600)
-            minutes = int((diff_seconds % 3600) // 60)
-            duration_str = f"{hours}h {minutes}m"
+            duration_str = f"{int(diff_seconds // 3600)}h {int((diff_seconds % 3600) // 60)}m"
 
         pct = ((mark - entry) / entry * 100) if side == "LONG" else ((entry - mark) / entry * 100)
 
@@ -394,14 +412,9 @@ def send_positions_report():
     send_telegram("\n".join(lines))
 
 def send_trade_stats():
-    try:
-        closed = futures_api.list_position_close("usdt", limit=50)
-    except Exception:
-        return
-
-    if not closed:
-        send_telegram("📈 <b>Trade Stats:</b> No closed trades yet.")
-        return
+    try: closed = futures_api.list_position_close("usdt", limit=50)
+    except Exception: return
+    if not closed: return
 
     total = len(closed)
     wins = sum(1 for p in closed if float(p.pnl) > 0)
@@ -426,14 +439,13 @@ def process_config(cfg):
     tf     = cfg["timeframe"]
     strat  = cfg["strategy"]
     params = cfg["params"]
+    filter_name = cfg.get("filter", "NONE")
 
     contract = resolve_contract(symbol)
-    if contract is None:
-        return
+    if contract is None: return
 
     df = fetch_gate_candles(contract, tf, limit=200)
-    if df is None or len(df) < 50:
-        return
+    if df is None or len(df) < 100: return
 
     state = load_json(STATE_FILE)
     cooldown = load_json(COOLDOWN_FILE)
@@ -441,14 +453,11 @@ def process_config(cfg):
     pos_info = get_position_info(contract)
     current_pos = pos_info["size"] if pos_info else 0
     
-    signal = generate_signal(df, strat, params)
+    signal = generate_signal_with_filters(df, strat, params, filter_name)
     my_key = f"{symbol}|{tf}|{strat}"
 
     if contract in cooldown:
-        if time.time() - cooldown[contract] < COOLDOWN_HOURS * 3600:
-            if current_pos == 0 and signal != 0:
-                print(f"  ⏳ {symbol}: in cooldown, skipping.")
-            return
+        if time.time() - cooldown[contract] < COOLDOWN_HOURS * 3600: return
 
     if current_pos == 0:
         if contract in state:
@@ -460,68 +469,66 @@ def process_config(cfg):
         if signal != 0:
             atr_val = atr(df, 14).iloc[-1]
             price = df["close"].iloc[-1]
-            if atr_val <= 0 or price <= 0:
-                return
+            if atr_val <= 0 or price <= 0: return
 
             specs = get_contract_specs(contract)
             multiplier = specs["quanto_multiplier"]
             
-            # ✅ باگ اصلاح شد:
-            # sl_dist = 2.5 * ATR
-            # tp_dist = 7.5 * ATR (نه 2.5 * 7.5)
             sl_dist = atr_val * ATR_MULT_SL
-            tp_dist = atr_val * ATR_MULT_TP  
+            tp_dist = atr_val * ATR_MULT_TP  # ✅ TP = 7.5 ATR
 
             equity = _equity_cache.get("usdt", 0.0)
-            if equity <= 0:
-                return
+            if equity <= 0: return
 
             risk_amount = equity * RISK_PCT
             raw_size = int(risk_amount / (multiplier * sl_dist))
             order_size_max = specs["order_size_max"]
             size = max(specs["order_size_min"], min(raw_size, order_size_max, MAX_CONTRACTS))
 
-            if size <= 0:
-                return
+            if size <= 0: return
 
+            # ✅ محدودیت مارجین (حداکثر 20% موجودی)
             required_margin = (size * multiplier * price) / LEVERAGE
+            max_allowed_margin = equity * MAX_MARGIN_PCT
+            if required_margin > max_allowed_margin:
+                size = int(size * (max_allowed_margin / required_margin))
+                required_margin = (size * multiplier * price) / LEVERAGE
+
             available = _available_cache.get("usdt", 0.0)
             if required_margin > available:
-                print(f"  ⏸️ {symbol}: Need {required_margin:.2f} margin, only {available:.2f} available.")
+                print(f"  ⏸️ {symbol}: Need {required_margin:.2f}, only {available:.2f} available.")
                 return
 
             set_leverage(contract, LEVERAGE)
 
             if signal == 1:
-                print(f"  📈 LONG {symbol} {tf} {strat} size={size}")
+                print(f"  📈 LONG {symbol} {tf} {strat} ({filter_name})")
                 if place_market_order(contract, size):
                     state[contract] = my_key
                     save_json(STATE_FILE, state)
                     place_sl_tp_orders(contract, "long", price - sl_dist, price + tp_dist, price, size)
                     send_telegram(
                         f"📈 <b>LONG</b> {symbol} <code>{tf}</code>\n"
-                        f"🎯 Strategy: <b>{strat}</b>\n"
+                        f"🎯 Strategy: <b>{strat}</b> | Filter: <b>{filter_name}</b>\n"
                         f"💰 Entry: <code>{price:.6f}</code>\n"
                         f"📦 Size: <code>{size}</code>\n"
                         f"🛡️ SL: <code>{price - sl_dist:.6f}</code>\n"
                         f"🎯 TP: <code>{price + tp_dist:.6f}</code>\n"
-                        f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
                         f"🧪 <i>TESTNET</i>"
                     )
             elif signal == -1:
-                print(f"  📉 SHORT {symbol} {tf} {strat} size={size}")
+                print(f"  📉 SHORT {symbol} {tf} {strat} ({filter_name})")
                 if place_market_order(contract, -size):
                     state[contract] = my_key
                     save_json(STATE_FILE, state)
                     place_sl_tp_orders(contract, "short", price + sl_dist, price - tp_dist, price, size)
                     send_telegram(
                         f"📉 <b>SHORT</b> {symbol} <code>{tf}</code>\n"
-                        f"🎯 Strategy: <b>{strat}</b>\n"
+                        f"🎯 Strategy: <b>{strat}</b> | Filter: <b>{filter_name}</b>\n"
                         f"💰 Entry: <code>{price:.6f}</code>\n"
                         f"📦 Size: <code>{size}</code>\n"
                         f"🛡️ SL: <code>{price + sl_dist:.6f}</code>\n"
                         f"🎯 TP: <code>{price - tp_dist:.6f}</code>\n"
-                        f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
                         f"🧪 <i>TESTNET</i>"
                     )
 
@@ -532,8 +539,7 @@ def process_config(cfg):
             save_json(STATE_FILE, state)
             owner = my_key
 
-        if owner != my_key:
-            return
+        if owner != my_key: return
 
         if (current_pos > 0 and signal == -1) or (current_pos < 0 and signal == 1):
             print(f"  🔄 Reverse {symbol}, closing")
@@ -572,7 +578,7 @@ def process_config(cfg):
 # ============================================================
 def main():
     print("=" * 70)
-    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — ULTIMATE 12 (FIXED)")
+    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — THE GOLDEN 10")
     print(f"🌐 HOST        : {GATE_HOST}")
     print(f"⚙️ LEVERAGE    : {LEVERAGE}x")
     print(f"📊 CONFIGS     : {len(BEST_CONFIGS)}")
@@ -592,7 +598,7 @@ def main():
     _available_cache["usdt"] = available
 
     send_telegram(
-        f"🧪 <b>Gate.io Scanner — ULTIMATE 12 (TP Fixed)</b>\n"
+        f"🧪 <b>Gate.io Scanner — THE GOLDEN 10</b>\n"
         f"💰 Equity: <code>${equity:.2f}</code> | Free: <code>${available:.2f}</code>\n"
         f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
         f"📊 Configs: <code>{len(BEST_CONFIGS)}</code>\n"
