@@ -6,5 +6,6 @@
   "SOL_USDT": "SOL/USDT|15m|Supertrend",
   "DOT_USDT": "DOT/USDT|30m|QQE",
   "XRP_USDT": "XRP/USDT|30m|QQE",
-  "ADA_USDT": "ADA/USDT|30m|QQE"
+  "ADA_USDT": "ADA/USDT|30m|QQE",
+  "FIL_USDT": "FIL/USDT|30m|QQE"
 }
