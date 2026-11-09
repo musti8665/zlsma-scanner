@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — THE GOLDEN 10
-===============================================
-- Uses the ultimate 10 configs from 40-asset, 60-day backtest (All 30m).
+Gate.io Futures TestNet Scanner — ULTIMATE 12 (Sensitivity Optimized)
+=====================================================================
+- Uses the ultimate 12 configs from Sensitivity Sweep + 50-Asset backtest.
 - Leverage: 10x, Cooldown: 4 hours, Risk: 2% per trade
 - Includes: HMA_20, HMA_50, WMA_50, TSI_SENS filters
 - Fixed TP Bug: TP is exactly 7.5 ATR (1:3 R:R)
@@ -48,35 +48,46 @@ def send_telegram(text: str):
 if "testnet" not in GATE_HOST.lower():
     sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — THE GOLDEN 10")
+print("🧪 GATE.IO TESTNET — ULTIMATE 12 (SENSITIVITY OPTIMIZED)")
 
 # ============================================================
 # PARAMETERS
 # ============================================================
 RISK_PCT          = 0.02
 ATR_MULT_SL       = 2.5
-ATR_MULT_TP       = 7.5  # ✅ TP اصلاح شده: 7.5 ATR
+ATR_MULT_TP       = 7.5
 MAX_CONTRACTS     = 90_000
 LEVERAGE          = 10
 STATE_FILE        = "state.json"
 COOLDOWN_FILE     = "cooldown.json"
 COOLDOWN_HOURS    = 4
-MAX_MARGIN_PCT    = 0.20 # ✅ حداکثر 20% از موجودی برای هر معامله
+MAX_MARGIN_PCT    = 0.20
 
 # ============================================================
-# ✅ THE GOLDEN 10 CONFIGS
+# ✅ THE ULTIMATE 12 CONFIGS
 # ============================================================
 BEST_CONFIGS = [
+    # --- QQE Sensitive (سود بالا + پایداری) ---
     {"symbol": "FIL/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}, "filter": "HMA_20"},
+    {"symbol": "INJ/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 3, "factor": 3.0}, "filter": "HMA_20"},
+    {"symbol": "APT/USDT",   "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 3, "factor": 3.0}, "filter": "HMA_20"},
+    {"symbol": "XRP/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 3, "factor": 3.0}, "filter": "HMA_20"},
+    
+    # --- Supertrend Sensitive (بهترین شارپ و کمترین DD) ---
     {"symbol": "FLOKI/USDT", "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}, "filter": "TSI_SENS"},
+    {"symbol": "OP/USDT",    "timeframe": "1h",  "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}, "filter": "TSI_SENS"},
     {"symbol": "HBAR/USDT",  "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}, "filter": "TSI_SENS"},
-    {"symbol": "UNI/USDT",   "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 3.0}, "filter": "WMA_50"},
     {"symbol": "APT/USDT",   "timeframe": "30m", "strategy": "Supertrend", "params": {"period": 14, "mult": 4.0}, "filter": "TSI_SENS"},
-    {"symbol": "DOT/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 4.236}, "filter": "HMA_50"},
-    {"symbol": "ADA/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 3, "factor": 4.236}, "filter": "HMA_20"},
-    {"symbol": "INJ/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 2.5}, "filter": "HMA_20"},
-    {"symbol": "XRP/USDT",   "timeframe": "30m", "strategy": "QQE",        "params": {"rsi_period": 14, "smooth": 5, "factor": 2.5}, "filter": "HMA_20"},
-    {"symbol": "BONK/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.2, "ma_period": 20}, "filter": "HMA_20"},
+    
+    # --- Volume VVVVS (سودهای بزرگ) ---
+    {"symbol": "BONK/USDT",  "timeframe": "30m", "strategy": "Volume",     "params": {"vol_mult": 1.05, "ma_period": 10}, "filter": "HMA_20"},
+    {"symbol": "APT/USDT",   "timeframe": "1h",  "strategy": "Volume",     "params": {"vol_mult": 1.05, "ma_period": 10}, "filter": "HMA_20"},
+    
+    # --- MACD (تنها برنده) ---
+    {"symbol": "HBAR/USDT",  "timeframe": "1h",  "strategy": "MACD",       "params": {"fast": 12, "slow": 26, "signal": 9}, "filter": "NONE"},
+    
+    # --- QQE Insensitive (تنوع) ---
+    {"symbol": "OP/USDT",    "timeframe": "15m", "strategy": "QQE",        "params": {"rsi_period": 20, "smooth": 7, "factor": 5.0}, "filter": "HMA_20"},
 ]
 
 # ============================================================
@@ -475,7 +486,7 @@ def process_config(cfg):
             multiplier = specs["quanto_multiplier"]
             
             sl_dist = atr_val * ATR_MULT_SL
-            tp_dist = atr_val * ATR_MULT_TP  # ✅ TP = 7.5 ATR
+            tp_dist = atr_val * ATR_MULT_TP
 
             equity = _equity_cache.get("usdt", 0.0)
             if equity <= 0: return
@@ -487,7 +498,6 @@ def process_config(cfg):
 
             if size <= 0: return
 
-            # ✅ محدودیت مارجین (حداکثر 20% موجودی)
             required_margin = (size * multiplier * price) / LEVERAGE
             max_allowed_margin = equity * MAX_MARGIN_PCT
             if required_margin > max_allowed_margin:
@@ -578,7 +588,7 @@ def process_config(cfg):
 # ============================================================
 def main():
     print("=" * 70)
-    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — THE GOLDEN 10")
+    print(f"🧪 ENVIRONMENT : TESTNET (DEMO) — ULTIMATE 12 (SENSITIVITY)")
     print(f"🌐 HOST        : {GATE_HOST}")
     print(f"⚙️ LEVERAGE    : {LEVERAGE}x")
     print(f"📊 CONFIGS     : {len(BEST_CONFIGS)}")
@@ -598,7 +608,7 @@ def main():
     _available_cache["usdt"] = available
 
     send_telegram(
-        f"🧪 <b>Gate.io Scanner — THE GOLDEN 10</b>\n"
+        f"🧪 <b>Gate.io Scanner — ULTIMATE 12 (SENSITIVITY)</b>\n"
         f"💰 Equity: <code>${equity:.2f}</code> | Free: <code>${available:.2f}</code>\n"
         f"⚙️ Leverage: <code>{LEVERAGE}x</code>\n"
         f"📊 Configs: <code>{len(BEST_CONFIGS)}</code>\n"
