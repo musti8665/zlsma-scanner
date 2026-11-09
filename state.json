@@ -3,5 +3,6 @@
   "HYPE_USDT": "HYPE/USD|15m|QQE",
   "AAVE_USDT": "AAVE/USDC|30m|Volume",
   "KAS_USDT": "KAS/USDT|30m|Volume",
-  "SOL_USDT": "SOL/USDT|15m|Supertrend"
+  "SOL_USDT": "SOL/USDT|15m|Supertrend",
+  "ADA_USDT": "ADA/USDT|30m|QQE"
 }
