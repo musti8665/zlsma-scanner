@@ -6,5 +6,6 @@
   "SOL_USDT": "SOL/USDT|15m|Supertrend",
   "HBAR_USDT": "HBAR/USDT|1h|MACD",
   "XRP_USDT": "XRP/USDT|30m|QQE->Supertrend",
-  "FIL_USDT": "FIL/USDT|30m|QQE->MACD"
+  "FIL_USDT": "FIL/USDT|30m|QQE->MACD",
+  "BCH_USDT": "BCH/USDT|1h|QQE->Supertrend"
 }
