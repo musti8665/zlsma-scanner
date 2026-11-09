@@ -1,12 +1,13 @@
-#!/usr/bin/env python3
+ #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Gate.io Futures TestNet Scanner — CROSS-STRATEGY GOLDEN 15
 ==========================================================
-- Entry signal from entry_strategy
-- Exit signal from exit_strategy (cross-strategy)
-- Plus SL/TP safety net: 2.5 / 7.5 ATR
-- Leverage 10x, cooldown 4h, risk 2%, max margin 20%
+- 15 configs from 27,071-backtest Cross-Strategy analysis
+- Entry: signal from entry_strategy
+- Exit:  opposite signal from exit_strategy (cross-strategy) + SL/TP
+- Leverage 10x | Cooldown 4h | Risk 2% | Max Margin 20%
+- TP = 7.5 ATR | SL = 2.5 ATR (1:3 R:R)
 """
 
 import os, sys, json, time, requests
@@ -40,6 +41,9 @@ def send_telegram(text: str):
     except Exception as e:
         print(f"  [TG] Error: {e}")
 
+# ============================================================
+# 🛡️ SAFETY: only run on testnet
+# ============================================================
 if "testnet" not in GATE_HOST.lower():
     print("❌ SAFETY: host is not testnet!"); sys.exit(99)
 
@@ -48,83 +52,98 @@ print("🧪 GATE.IO TESTNET — CROSS-STRATEGY GOLDEN 15")
 # ============================================================
 # ⚙️ PARAMETERS
 # ============================================================
-RISK_PCT       = 0.02
-ATR_MULT_SL    = 2.5
-ATR_MULT_TP    = 7.5
+RISK_PCT       = 0.02      # 2% risk per trade
+ATR_MULT_SL    = 2.5       # SL = 2.5 ATR
+ATR_MULT_TP    = 7.5       # TP = 7.5 ATR (1:3 R:R)
 MAX_CONTRACTS  = 90_000
 LEVERAGE       = 10
 STATE_FILE     = "state.json"
 COOLDOWN_FILE  = "cooldown.json"
 COOLDOWN_HOURS = 4
-MAX_MARGIN_PCT = 0.20
+MAX_MARGIN_PCT = 0.20      # max 20% equity per trade
 
 # ============================================================
 # ✅ GOLDEN 15 — Cross-Strategy Portfolio
 # ============================================================
 BEST_CONFIGS = [
-    {"symbol": "OP/USDT",    "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 5.0}, "entry_filter": "TSI_SENS",
-     "exit_strategy":  "QQE",        "exit_params":  {"rsi_period": 14, "smooth": 7, "factor": 5.0}, "exit_filter": "HMA_20"},
+    # 1. POL 1h: QQE_I → MACD_S
+    {"symbol": "POL/USDT", "timeframe": "1h",
+     "entry_strategy": "QQE",        "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},   "entry_filter": "HMA_20",
+     "exit_strategy":  "MACD",       "exit_params":  {"fast": 8, "slow": 17, "signal": 5},             "exit_filter":  "NONE"},
 
-    {"symbol": "POL/USDT",   "timeframe": "1h",
-     "entry_strategy": "QQE",        "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0}, "entry_filter": "HMA_20",
-     "exit_strategy":  "MACD",       "exit_params":  {"fast": 8, "slow": 17, "signal": 5}, "exit_filter": "NONE"},
+    # 2. OP 1h: ST_I → QQE_I (بالاترین شارپ)
+    {"symbol": "OP/USDT", "timeframe": "1h",
+     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 5.0},                       "entry_filter": "TSI_SENS",
+     "exit_strategy":  "QQE",        "exit_params":  {"rsi_period": 14, "smooth": 7, "factor": 5.0},    "exit_filter":  "HMA_20"},
 
-    {"symbol": "WLD/USDT",   "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 5.0}, "entry_filter": "TSI_SENS",
-     "exit_strategy":  "MACD",       "exit_params":  {"fast": 20, "slow": 40, "signal": 12}, "exit_filter": "NONE"},
+    # 3. WLD 1h: ST_I → MACD_I
+    {"symbol": "WLD/USDT", "timeframe": "1h",
+     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 5.0},                       "entry_filter": "TSI_SENS",
+     "exit_strategy":  "MACD",       "exit_params":  {"fast": 20, "slow": 40, "signal": 12},            "exit_filter":  "NONE"},
 
-    {"symbol": "WLD/USDT",   "timeframe": "30m",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 5.0}, "entry_filter": "TSI_SENS",
-     "exit_strategy":  "QQE",        "exit_params":  {"rsi_period": 14, "smooth": 5, "factor": 4.236}, "exit_filter": "HMA_20"},
+    # 4. ETH 30m: QQE_I → ST_S
+    {"symbol": "ETH/USDT", "timeframe": "30m",
+     "entry_strategy": "QQE",        "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},    "entry_filter": "HMA_20",
+     "exit_strategy":  "Supertrend", "exit_params":  {"period": 14, "mult": 3.0},                       "exit_filter":  "TSI_SENS"},
 
-    {"symbol": "ETH/USDT",   "timeframe": "30m",
-     "entry_strategy": "QQE",        "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0}, "entry_filter": "HMA_20",
-     "exit_strategy":  "Supertrend", "exit_params":  {"period": 14, "mult": 3.0}, "exit_filter": "TSI_SENS"},
+    # 5. ADA 1h: ST_N → VOL_N (کم‌ریسک‌ترین DD)
+    {"symbol": "ADA/USDT", "timeframe": "1h",
+     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},                       "entry_filter": "TSI_SENS",
+     "exit_strategy":  "Volume",     "exit_params":  {"vol_mult": 1.2, "ma_period": 20},                "exit_filter":  "HMA_20"},
 
-    {"symbol": "XRP/USDT",   "timeframe": "30m",
-     "entry_strategy": "QQE",        "entry_params": {"rsi_period": 14, "smooth": 3, "factor": 3.0}, "entry_filter": "HMA_20",
-     "exit_strategy":  "Supertrend", "exit_params":  {"period": 14, "mult": 4.0}, "exit_filter": "TSI_SENS"},
+    # 6. SAND 30m: MACD_N → ST_S
+    {"symbol": "SAND/USDT", "timeframe": "30m",
+     "entry_strategy": "MACD",       "entry_params": {"fast": 12, "slow": 26, "signal": 9},             "entry_filter": "NONE",
+     "exit_strategy":  "Supertrend", "exit_params":  {"period": 14, "mult": 3.0},                       "exit_filter":  "TSI_SENS"},
 
-    {"symbol": "FIL/USDT",   "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0}, "entry_filter": "TSI_SENS",
-     "exit_strategy":  "QQE",        "exit_params":  {"rsi_period": 14, "smooth": 7, "factor": 5.0}, "exit_filter": "HMA_20"},
+    # 7. FIL 30m: QQE_N → MACD_I
+    {"symbol": "FIL/USDT", "timeframe": "30m",
+     "entry_strategy": "QQE",        "entry_params": {"rsi_period": 14, "smooth": 5, "factor": 4.236},  "entry_filter": "HMA_20",
+     "exit_strategy":  "MACD",       "exit_params":  {"fast": 20, "slow": 40, "signal": 12},            "exit_filter":  "NONE"},
 
-    {"symbol": "ADA/USDT",   "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0}, "entry_filter": "TSI_SENS",
-     "exit_strategy":  "Volume",     "exit_params":  {"vol_mult": 1.2, "ma_period": 20}, "exit_filter": "HMA_20"},
+    # 8. NEAR 30m: ST_N → VOL_N
+    {"symbol": "NEAR/USDT", "timeframe": "30m",
+     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},                       "entry_filter": "TSI_SENS",
+     "exit_strategy":  "Volume",     "exit_params":  {"vol_mult": 1.2, "ma_period": 20},                "exit_filter":  "HMA_20"},
 
-    {"symbol": "BCH/USDT",   "timeframe": "1h",
-     "entry_strategy": "QQE",        "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0}, "entry_filter": "HMA_20",
-     "exit_strategy":  "Supertrend", "exit_params":  {"period": 14, "mult": 3.0}, "exit_filter": "TSI_SENS"},
+    # 9. GRT 1h: VOL_I → MACD_N
+    {"symbol": "GRT/USDT", "timeframe": "1h",
+     "entry_strategy": "Volume",     "entry_params": {"vol_mult": 1.5, "ma_period": 30},                "entry_filter": "HMA_20",
+     "exit_strategy":  "MACD",       "exit_params":  {"fast": 12, "slow": 26, "signal": 9},             "exit_filter":  "NONE"},
 
-    {"symbol": "TIA/USDT",   "timeframe": "30m",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0}, "entry_filter": "TSI_SENS",
-     "exit_strategy":  "Volume",     "exit_params":  {"vol_mult": 1.0, "ma_period": 8}, "exit_filter": "HMA_20"},
+    # 10. BONK 30m: ST_S → ST_I
+    {"symbol": "BONK/USDT", "timeframe": "30m",
+     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},                       "entry_filter": "TSI_SENS",
+     "exit_strategy":  "Supertrend", "exit_params":  {"period": 14, "mult": 5.0},                       "exit_filter":  "TSI_SENS"},
 
-    {"symbol": "NEAR/USDT",  "timeframe": "30m",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0}, "entry_filter": "TSI_SENS",
-     "exit_strategy":  "Volume",     "exit_params":  {"vol_mult": 1.2, "ma_period": 20}, "exit_filter": "HMA_20"},
+    # 11. BCH 1h: QQE_I → ST_S
+    {"symbol": "BCH/USDT", "timeframe": "1h",
+     "entry_strategy": "QQE",        "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},    "entry_filter": "HMA_20",
+     "exit_strategy":  "Supertrend", "exit_params":  {"period": 14, "mult": 3.0},                       "exit_filter":  "TSI_SENS"},
 
-    {"symbol": "FET/USDT",   "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0}, "entry_filter": "TSI_SENS",
-     "exit_strategy":  "Volume",     "exit_params":  {"vol_mult": 1.2, "ma_period": 20}, "exit_filter": "HMA_20"},
+    # 12. TIA 30m: ST_N → VOL_I
+    {"symbol": "TIA/USDT", "timeframe": "30m",
+     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},                       "entry_filter": "TSI_SENS",
+     "exit_strategy":  "Volume",     "exit_params":  {"vol_mult": 1.5, "ma_period": 30},                "exit_filter":  "HMA_20"},
 
+    # 13. FET 1h: ST_N → VOL_N
+    {"symbol": "FET/USDT", "timeframe": "1h",
+     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},                       "entry_filter": "TSI_SENS",
+     "exit_strategy":  "Volume",     "exit_params":  {"vol_mult": 1.2, "ma_period": 20},                "exit_filter":  "HMA_20"},
+
+    # 14. XRP 30m: QQE_S → ST_I
+    {"symbol": "XRP/USDT", "timeframe": "30m",
+     "entry_strategy": "QQE",        "entry_params": {"rsi_period": 14, "smooth": 3, "factor": 3.0},    "entry_filter": "HMA_20",
+     "exit_strategy":  "Supertrend", "exit_params":  {"period": 14, "mult": 5.0},                       "exit_filter":  "TSI_SENS"},
+
+    # 15. FLOKI 1h: ST_S → QQE_N
     {"symbol": "FLOKI/USDT", "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0}, "entry_filter": "TSI_SENS",
-     "exit_strategy":  "QQE",        "exit_params":  {"rsi_period": 14, "smooth": 5, "factor": 4.236}, "exit_filter": "HMA_20"},
-
-    {"symbol": "LTC/USDT",   "timeframe": "1h",
-     "entry_strategy": "MACD",       "entry_params": {"fast": 8, "slow": 17, "signal": 5}, "entry_filter": "NONE",
-     "exit_strategy":  "MACD",       "exit_params":  {"fast": 12, "slow": 26, "signal": 9}, "exit_filter": "NONE"},
-
-    {"symbol": "GRT/USDT",   "timeframe": "1h",
-     "entry_strategy": "Volume",     "entry_params": {"vol_mult": 1.5, "ma_period": 30}, "entry_filter": "HMA_20",
-     "exit_strategy":  "MACD",       "exit_params":  {"fast": 12, "slow": 26, "signal": 9}, "exit_filter": "NONE"},
+     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},                       "entry_filter": "TSI_SENS",
+     "exit_strategy":  "QQE",        "exit_params":  {"rsi_period": 14, "smooth": 5, "factor": 4.236},  "exit_filter":  "HMA_20"},
 ]
 
 # ============================================================
-# CLIENT & STATE
+# CLIENT & CACHES
 # ============================================================
 config = Configuration(key=API_KEY, secret=API_SECRET, host=GATE_HOST)
 futures_api = FuturesApi(ApiClient(config))
@@ -142,7 +161,7 @@ for f in (STATE_FILE, COOLDOWN_FILE):
 def load_json(fp):
     try:
         with open(fp) as f: return json.load(f)
-    except: return {}
+    except Exception: return {}
 
 def save_json(fp, data):
     try:
@@ -152,35 +171,38 @@ def save_json(fp, data):
 def get_contracts():
     if "usdt" not in _contracts_cache:
         try: _contracts_cache["usdt"] = futures_api.list_futures_contracts("usdt")
-        except: _contracts_cache["usdt"] = []
+        except Exception: _contracts_cache["usdt"] = []
     return _contracts_cache["usdt"]
 
 def get_contract_specs(contract):
     if contract in _specs_cache: return _specs_cache[contract]
     for c in get_contracts():
         if c.name == contract:
-            spec = {"quanto_multiplier": float(c.quanto_multiplier),
-                    "order_size_min": int(c.order_size_min),
-                    "order_size_max": int(c.order_size_max),
-                    "order_price_round": float(c.order_price_round) if hasattr(c, "order_price_round") else 0.0001}
+            spec = {
+                "quanto_multiplier": float(c.quanto_multiplier),
+                "order_size_min": int(c.order_size_min),
+                "order_size_max": int(c.order_size_max),
+                "order_price_round": float(c.order_price_round) if hasattr(c, "order_price_round") else 0.0001,
+            }
             _specs_cache[contract] = spec
             return spec
-    return {"quanto_multiplier": 1.0, "order_size_min": 1, "order_size_max": MAX_CONTRACTS, "order_price_round": 0.0001}
+    return {"quanto_multiplier": 1.0, "order_size_min": 1,
+            "order_size_max": MAX_CONTRACTS, "order_price_round": 0.0001}
 
 def round_to_tick(price, tick): return round(price / tick) * tick
 
 # ============================================================
 # INDICATORS
 # ============================================================
-def atr(df, p=14):
+def atr(df, period=14):
     h, l, c = df["high"], df["low"], df["close"]
     tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
-    return tr.ewm(alpha=1 / p, adjust=False).mean()
+    return tr.ewm(alpha=1 / period, adjust=False).mean()
 
-def rsi(s, p=14):
-    d = s.diff()
-    g = d.clip(lower=0).ewm(alpha=1 / p, adjust=False).mean()
-    l = (-d.clip(upper=0)).ewm(alpha=1 / p, adjust=False).mean()
+def rsi(series, period=14):
+    d = series.diff()
+    g = d.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
+    l = (-d.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
     return 100 - 100 / (1 + g / l.replace(0, np.nan))
 
 def supertrend(df, period=10, mult=3.0):
@@ -275,10 +297,14 @@ def apply_filter(df, sig, filt):
     if filt == "NONE": return sig
     close = df["close"]
     bull = np.zeros(len(df), dtype=bool); bear = np.zeros(len(df), dtype=bool)
+
     if filt == "HMA_20":
-        h = hma(close, 20); bull, bear = (close > h).values, (close < h).values
+        h = hma(close, 20)
+        bull, bear = (close > h).values, (close < h).values
     elif filt == "TSI_SENS":
-        t = tsi(close); bull, bear = (t > 0).values, (t < 0).values
+        t = tsi(close)
+        bull, bear = (t > 0).values, (t < 0).values
+
     out = sig.copy()
     out[(sig == 1) & (~bull)] = 0
     out[(sig == -1) & (~bear)] = 0
@@ -308,7 +334,7 @@ def fetch_candles(contract, tf, limit=200):
         df = df.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"})
         _candles_cache[key] = df
         return df
-    except: return None
+    except Exception: return None
 
 def resolve_contract(symbol):
     base = symbol.split("/")[0]
@@ -324,12 +350,12 @@ def get_position_info(contract):
                 return {"size": int(p.size), "entry_price": float(p.entry_price),
                         "mark_price": float(p.mark_price), "unrealised_pnl": float(p.unrealised_pnl),
                         "open_time": int(p.open_time) if hasattr(p, "open_time") and p.open_time else None}
-    except: pass
+    except Exception: pass
     return None
 
 def set_leverage(contract, lev):
     try: futures_api.update_position_leverage("usdt", contract, str(lev))
-    except: pass
+    except Exception: pass
 
 # ============================================================
 # ORDERS
@@ -342,76 +368,94 @@ def place_market_order(contract, size):
         return True
     except Exception as e:
         msg = str(e)
-        if "MARKET_PRICE_TOO_DEVIATED" in msg: print(f"  ⏸️ {contract}: slippage")
-        elif "INSUFFICIENT_AVAILABLE" in msg: print(f"  ⏸️ {contract}: no margin")
-        else: print(f"  ❌ {contract}: {e}")
+        if "MARKET_PRICE_TOO_DEVIATED" in msg:
+            print(f"  ⏸️ {contract}: slippage")
+        elif "INSUFFICIENT_AVAILABLE" in msg:
+            print(f"  ⏸️ {contract}: no margin")
+        else:
+            print(f"  ❌ {contract}: {e}")
         return False
 
-def close_position_market(contract, size):
+def close_position_market(contract, current_size):
     order = FuturesOrder(contract=contract, size=0, price="0", tif="ioc", reduce_only=True, close=True)
     try:
         futures_api.create_futures_order("usdt", order)
         print(f"  🧪 CLOSE {contract}")
-    except Exception as e: print(f"  ❌ Close {contract}: {e}")
+    except Exception as e:
+        print(f"  ❌ Close {contract}: {e}")
 
 def place_sl_tp(contract, side, sl_price, tp_price, entry_price, size):
     specs = get_contract_specs(contract)
     tick = specs["order_price_round"]
-    sl_price = round_to_tick(sl_price, tick); tp_price = round_to_tick(tp_price, tick)
-    sl_rule = 2 if side == "long" else 1; tp_rule = 1 if side == "long" else 2
+    sl_price = round_to_tick(sl_price, tick)
+    tp_price = round_to_tick(tp_price, tick)
+    sl_rule = 2 if side == "long" else 1
+    tp_rule = 1 if side == "long" else 2
     order_type = "close-long-position" if side == "long" else "close-short-position"
 
     for kind, price, rule in [("SL", sl_price, sl_rule), ("TP", tp_price, tp_rule)]:
         order = FuturesPriceTriggeredOrder(
             initial=FuturesInitialOrder(contract=contract, size=0, price="0", tif="ioc", reduce_only=True, close=True),
             trigger=FuturesPriceTrigger(strategy_type=0, price_type=0, price=f"{price:.10f}", rule=rule, expiration=86400),
-            order_type=order_type)
+            order_type=order_type,
+        )
         try:
             futures_api.create_price_triggered_order("usdt", order)
             print(f"  🧪 {kind} {contract} @ {price:.6f}")
-        except Exception as e: print(f"  ⚠️ {kind} {contract}: {e}")
+        except Exception as e:
+            print(f"  ⚠️ {kind} {contract}: {e}")
 
 # ============================================================
 # REPORTS
 # ============================================================
 def send_positions_report():
     try: positions = futures_api.list_positions("usdt")
-    except: return
+    except Exception: return
     active = [p for p in positions if int(p.size) != 0]
     if not active:
-        send_telegram("📭 <b>No open positions</b>"); return
+        send_telegram("📭 <b>No open positions</b>")
+        return
     now = datetime.now(timezone.utc).timestamp()
-    total_pnl = 0; lines = [f"📊 <b>Open Positions ({len(active)})</b>\n"]
+    total_pnl = 0.0
+    lines = [f"📊 <b>Open Positions ({len(active)})</b>\n"]
     for p in active:
         size = int(p.size); side = "LONG" if size > 0 else "SHORT"
         entry = float(p.entry_price); mark = float(p.mark_price); pnl = float(p.unrealised_pnl)
         total_pnl += pnl
         dur = "N/A"
         if hasattr(p, "open_time") and p.open_time:
-            d = now - int(p.open_time); dur = f"{int(d // 3600)}h {int((d % 3600) // 60)}m"
+            d = now - int(p.open_time)
+            dur = f"{int(d // 3600)}h {int((d % 3600) // 60)}m"
         pct = ((mark - entry) / entry * 100) if side == "LONG" else ((entry - mark) / entry * 100)
-        lines.append(f"{'🟢' if side=='LONG' else '🔴'} <b>{p.contract}</b> {side} | {abs(size)}\n"
-                     f"   ⏱ {dur} | Entry: {entry:.6f} | Mark: {mark:.6f}\n"
-                     f"   PnL: {'✅' if pnl>=0 else '❌'} {pnl:+.4f} USDT ({pct:+.2f}%)\n")
+        lines.append(
+            f"{'🟢' if side=='LONG' else '🔴'} <b>{p.contract}</b> {side} | {abs(size)}\n"
+            f"   ⏱ {dur} | Entry: {entry:.6f} | Mark: {mark:.6f}\n"
+            f"   PnL: {'✅' if pnl>=0 else '❌'} {pnl:+.4f} USDT ({pct:+.2f}%)\n"
+        )
     lines.append(f"\n💰 <b>Total: {total_pnl:+.4f} USDT</b>")
     send_telegram("\n".join(lines))
 
 def send_trade_stats():
     try: closed = futures_api.list_position_close("usdt", limit=50)
-    except: return
+    except Exception: return
     if not closed: return
     total = len(closed)
     wins = sum(1 for p in closed if float(p.pnl) > 0)
     total_pnl = sum(float(p.pnl) for p in closed)
     wr = (wins / total * 100) if total > 0 else 0
-    send_telegram(f"📈 <b>Last {total} Closed:</b>\n✅ {wins}W | ❌ {total-wins}L\n"
-                  f"🎯 WR: {wr:.1f}% | 💰 {total_pnl:+.4f} USDT\n🧪 <i>TESTNET</i>")
+    send_telegram(
+        f"📈 <b>Last {total} Closed:</b>\n"
+        f"✅ {wins}W | ❌ {total-wins}L\n"
+        f"🎯 WR: {wr:.1f}% | 💰 {total_pnl:+.4f} USDT\n"
+        f"🧪 <i>TESTNET</i>"
+    )
 
 # ============================================================
 # TRADING LOGIC — CROSS-STRATEGY
 # ============================================================
 def process_config(cfg):
-    symbol = cfg["symbol"]; tf = cfg["timeframe"]
+    symbol = cfg["symbol"]
+    tf = cfg["timeframe"]
     entry_strat = cfg["entry_strategy"]; entry_params = cfg["entry_params"]; entry_filt = cfg["entry_filter"]
     exit_strat  = cfg["exit_strategy"];  exit_params  = cfg["exit_params"];  exit_filt  = cfg["exit_filter"]
 
@@ -421,7 +465,8 @@ def process_config(cfg):
     df = fetch_candles(contract, tf, limit=200)
     if df is None or len(df) < 100: return
 
-    state = load_json(STATE_FILE); cooldown = load_json(COOLDOWN_FILE)
+    state = load_json(STATE_FILE)
+    cooldown = load_json(COOLDOWN_FILE)
     pos_info = get_position_info(contract)
     current_pos = pos_info["size"] if pos_info else 0
 
@@ -430,16 +475,21 @@ def process_config(cfg):
 
     my_key = f"{symbol}|{tf}|{entry_strat}->{exit_strat}"
 
+    # Cooldown check
     if contract in cooldown and time.time() - cooldown[contract] < COOLDOWN_HOURS * 3600:
         return
 
     if current_pos == 0:
+        # No open position → look for entry
         if contract in state:
-            cooldown[contract] = time.time(); save_json(COOLDOWN_FILE, cooldown)
-            del state[contract]; save_json(STATE_FILE, state)
+            cooldown[contract] = time.time()
+            save_json(COOLDOWN_FILE, cooldown)
+            del state[contract]
+            save_json(STATE_FILE, state)
 
         if entry_sig != 0:
-            atr_val = atr(df, 14).iloc[-1]; price = df["close"].iloc[-1]
+            atr_val = atr(df, 14).iloc[-1]
+            price = df["close"].iloc[-1]
             if atr_val <= 0 or price <= 0: return
 
             specs = get_contract_specs(contract)
@@ -454,6 +504,7 @@ def process_config(cfg):
             size = max(specs["order_size_min"], min(raw_size, specs["order_size_max"], MAX_CONTRACTS))
             if size <= 0: return
 
+            # Margin limit check
             req_margin = (size * mult * price) / LEVERAGE
             max_margin = equity * MAX_MARGIN_PCT
             if req_margin > max_margin:
@@ -470,50 +521,64 @@ def process_config(cfg):
             if entry_sig == 1:
                 print(f"  📈 LONG {symbol} {tf} [{entry_strat}→{exit_strat}]")
                 if place_market_order(contract, size):
-                    state[contract] = my_key; save_json(STATE_FILE, state)
+                    state[contract] = my_key
+                    save_json(STATE_FILE, state)
                     place_sl_tp(contract, "long", price - sl_dist, price + tp_dist, price, size)
-                    send_telegram(f"📈 <b>LONG</b> {symbol} {tf}\n"
-                                  f"🎯 {entry_strat} → {exit_strat}\n"
-                                  f"💰 {price:.6f} | 📦 {size}\n"
-                                  f"🛡️ {price - sl_dist:.6f} | 🎯 {price + tp_dist:.6f}\n"
-                                  f"🧪 <i>TESTNET</i>")
+                    send_telegram(
+                        f"📈 <b>LONG</b> {symbol} {tf}\n"
+                        f"🎯 {entry_strat} → {exit_strat}\n"
+                        f"💰 {price:.6f} | 📦 {size}\n"
+                        f"🛡️ {price - sl_dist:.6f} | 🎯 {price + tp_dist:.6f}\n"
+                        f"🧪 <i>TESTNET</i>"
+                    )
             elif entry_sig == -1:
                 print(f"  📉 SHORT {symbol} {tf} [{entry_strat}→{exit_strat}]")
                 if place_market_order(contract, -size):
-                    state[contract] = my_key; save_json(STATE_FILE, state)
+                    state[contract] = my_key
+                    save_json(STATE_FILE, state)
                     place_sl_tp(contract, "short", price + sl_dist, price - tp_dist, price, size)
-                    send_telegram(f"📉 <b>SHORT</b> {symbol} {tf}\n"
-                                  f"🎯 {entry_strat} → {exit_strat}\n"
-                                  f"💰 {price:.6f} | 📦 {size}\n"
-                                  f"🛡️ {price + sl_dist:.6f} | 🎯 {price - tp_dist:.6f}\n"
-                                  f"🧪 <i>TESTNET</i>")
+                    send_telegram(
+                        f"📉 <b>SHORT</b> {symbol} {tf}\n"
+                        f"🎯 {entry_strat} → {exit_strat}\n"
+                        f"💰 {price:.6f} | 📦 {size}\n"
+                        f"🛡️ {price + sl_dist:.6f} | 🎯 {price - tp_dist:.6f}\n"
+                        f"🧪 <i>TESTNET</i>"
+                    )
 
     else:
+        # Position open → check cross-strategy exit
         owner = state.get(contract)
         if owner is None:
-            state[contract] = my_key; save_json(STATE_FILE, state); owner = my_key
+            state[contract] = my_key
+            save_json(STATE_FILE, state)
+            owner = my_key
         if owner != my_key: return
 
-        # Cross-Strategy exit: opposite signal from EXIT strategy
+        # ✅ CROSS-STRATEGY EXIT: opposite signal from EXIT strategy
         should_exit = (current_pos > 0 and exit_sig == -1) or (current_pos < 0 and exit_sig == 1)
 
         if should_exit:
-            print(f"  🔄 Reverse {symbol} [exit={exit_strat}]")
-            pnl = pos_info["unrealised_pnl"]; ot = pos_info["open_time"]
+            print(f"  🔄 Reverse {symbol} [exit_strat={exit_strat}]")
+            pnl = pos_info["unrealised_pnl"]
+            open_time = pos_info["open_time"]
             dur = "N/A"
-            if ot:
-                d = datetime.now(timezone.utc).timestamp() - ot
+            if open_time:
+                d = datetime.now(timezone.utc).timestamp() - open_time
                 dur = f"{int(d // 3600)}h {int((d % 3600) // 60)}m"
 
             close_position_market(contract, current_pos)
-            del state[contract]; save_json(STATE_FILE, state)
-            cooldown[contract] = time.time(); save_json(COOLDOWN_FILE, cooldown)
+            del state[contract]
+            save_json(STATE_FILE, state)
+            cooldown[contract] = time.time()
+            save_json(COOLDOWN_FILE, cooldown)
 
             side = "LONG" if current_pos > 0 else "SHORT"
-            send_telegram(f"🚪 <b>CLOSED</b> {side} {symbol} {tf}\n"
-                          f"🎯 {entry_strat} → {exit_strat}\n"
-                          f"⏱ {dur} | 📊 {'✅' if pnl>=0 else '❌'} {pnl:+.4f} USDT\n"
-                          f"🧪 <i>TESTNET</i>")
+            send_telegram(
+                f"🚪 <b>CLOSED</b> {side} {symbol} {tf}\n"
+                f"🎯 {entry_strat} → {exit_strat}\n"
+                f"⏱ {dur} | 📊 {'✅' if pnl>=0 else '❌'} {pnl:+.4f} USDT\n"
+                f"🧪 <i>TESTNET</i>"
+            )
 
 # ============================================================
 # MAIN
@@ -531,21 +596,28 @@ def main():
         available = float(acc.available) if hasattr(acc, "available") else 0.0
         print(f"\n✅ Equity: {equity:.2f} | Available: {available:.2f}\n")
     except Exception as e:
-        print(f"❌ {e}"); send_telegram(f"❌ Connection: {e}"); sys.exit(1)
+        print(f"❌ Connection failed: {e}")
+        send_telegram(f"❌ Connection: {e}")
+        sys.exit(1)
 
     _equity_cache["usdt"] = equity
     _available_cache["usdt"] = available
 
-    send_telegram(f"🧪 <b>Cross-Strategy Scanner</b>\n"
-                  f"💰 ${equity:.2f} | Free: ${available:.2f}\n"
-                  f"⚙️ {LEVERAGE}x | 📊 {len(BEST_CONFIGS)} configs\n"
-                  f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC")
+    send_telegram(
+        f"🧪 <b>Cross-Strategy Golden 15</b>\n"
+        f"💰 ${equity:.2f} | Free: ${available:.2f}\n"
+        f"⚙️ {LEVERAGE}x | 📊 {len(BEST_CONFIGS)} configs\n"
+        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+    )
 
     send_positions_report()
 
+    print(f"🚀 Processing {len(BEST_CONFIGS)} configs...\n")
     for cfg in BEST_CONFIGS:
-        try: process_config(cfg)
-        except Exception as e: print(f"  ❌ {cfg['symbol']}: {e}")
+        try:
+            process_config(cfg)
+        except Exception as e:
+            print(f"  ❌ {cfg['symbol']}: {e}")
 
     send_positions_report()
     send_trade_stats()
