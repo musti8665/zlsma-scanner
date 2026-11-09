@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -44,7 +46,6 @@ jobs:
           ls -la
           test -f gate_scanner.py || (echo "❌ gate_scanner.py missing" && exit 1)
           test -f requirements.txt || (echo "❌ requirements.txt missing" && exit 1)
-          test -f state.json || (echo "❌ state.json missing" && exit 1)
           echo "✅ All files present"
 
       - name: Run scanner
@@ -52,11 +53,10 @@ jobs:
           PYTHONUNBUFFERED: 1
         run: python gate_scanner.py
 
-      # ✅ این بخش اصلاح شد
-      - name: Commit state
+      # ✅ نسخه اصلاح‌شده: بدون پارامتر pull
+      - name: Commit state and cooldown
         if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🧪 chore(testnet): update state [skip ci]"
-          file_pattern: "state.json"
-          pull: --rebase --autostash   # <--- این خط اضافه شد تا تغییرات قبلی را بگیرد
+          commit_message: "🧪 chore(testnet): update state and cooldown [skip ci]"
+          file_pattern: "state.json cooldown.json"
