@@ -1,4 +1,4 @@
-name: 🧪 Gate.io TestNet Scanner (DEMO — NO REAL MONEY)
+name: 🧪 Gate.io TestNet Scanner
 
 on:
   schedule:
@@ -18,13 +18,11 @@ jobs:
     timeout-minutes: 8
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -32,31 +30,16 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install gate-api pandas numpy requests
-
-      - name: 🛡️ Assert TestNet
-        run: |
-          echo "═══════════════════════════════════════════════════"
-          echo "🧪 ENVIRONMENT: GATE.IO TESTNET (DEMO)"
-          echo "🧪 VIRTUAL FUNDS ONLY — NO REAL MONEY"
-          echo "═══════════════════════════════════════════════════"
-
-      - name: Verify files
-        run: |
-          ls -la
-          test -f gate_scanner.py || (echo "❌ gate_scanner.py missing" && exit 1)
-          test -f requirements.txt || (echo "❌ requirements.txt missing" && exit 1)
-          echo "✅ All files present"
+          pip install -r requirements.txt
 
       - name: Run scanner
         env:
           PYTHONUNBUFFERED: 1
         run: python gate_scanner.py
 
-      # ✅ نسخه اصلاح‌شده: بدون پارامتر pull
-      - name: Commit state and cooldown
+      - name: Commit state
         if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🧪 chore(testnet): update state and cooldown [skip ci]"
+          commit_message: "🧪 chore(testnet): update state [skip ci]"
           file_pattern: "state.json cooldown.json"
