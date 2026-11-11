@@ -7,5 +7,6 @@
   "HBAR_USDT": "HBAR/USDT|1h|MACD",
   "FIL_USDT": "FIL/USDT|1h|Supertrend+TSI\u2192QQE",
   "ETH_USDT": "ETH/USDT|30m|QQE+HMA\u2192Supertrend",
-  "PEPE_USDT": "PEPE/USDT|30m|Supertrend+ALMA\u2192Supertrend"
+  "PEPE_USDT": "PEPE/USDT|30m|Supertrend+ALMA\u2192Supertrend",
+  "BCH_USDT": "BCH/USDT|1h|QQE+HMA\u2192Supertrend"
 }
