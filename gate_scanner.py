@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — FINAL 25
-==========================================
-- 25 configs = best Sharpe per asset from 300,000+ backtests
+Gate.io Futures TestNet Scanner — FINAL 25 + 2 Tweaks
+=====================================================
+- 25 configs from 300,000+ backtests
 - 8 filter types: HMA, DEMA, TEMA, VWMA, ALMA, KAMA, ZLEMA, TSI
-- Independent entry & exit filters
+- 2 exit-filter tweaks: MAGIC→VWMA100, GALA→HMA7 (+1.4 & +2.7 Sharpe)
 - SL = 2.5 ATR | TP = 7.5 ATR (1:3 R:R)
 - Leverage 10x | Cooldown 4h | Risk 2% | Max Margin 20%
-
-Portfolio (60-day backtest):
-  Avg Return: ~52% | Avg Sharpe: ~6.5-7.0 | Avg DD: -7.4%
-  TF Mix: 14×1h + 11×30m
 """
 
 import os, sys, json, time, requests
@@ -51,7 +47,7 @@ def send_telegram(text):
 if "testnet" not in GATE_HOST.lower():
     print("❌ SAFETY: host is not testnet!"); sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — FINAL 25")
+print("🧪 GATE.IO TESTNET — FINAL 25 + 2 TWEAKS")
 
 # ============================================================
 # ⚙️ PARAMETERS
@@ -67,10 +63,10 @@ COOLDOWN_HOURS = 4
 MAX_MARGIN_PCT = 0.20
 
 # ============================================================
-# ✅ FINAL 25 CONFIGS
+# ✅ FINAL 25 + 2 TWEAKS
 # ============================================================
 BEST_CONFIGS = [
-    # 1. ADA 1h — VWMA 100 (بهبود یافته +0.90)
+    # 1. ADA 1h — VWMA 100
     {"symbol": "ADA/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
@@ -180,7 +176,7 @@ BEST_CONFIGS = [
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "QQE", "exit_params": {"rsi_period": 14, "smooth": 3, "factor": 3.0}},
 
-    # 19. SAND 30m — VWMA 100 (بهبود یافته +0.83)
+    # 19. SAND 30m
     {"symbol": "SAND/USDT", "timeframe": "30m",
      "entry_strategy": "MACD", "entry_params": {"fast": 12, "slow": 26, "signal": 9},
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
@@ -193,7 +189,7 @@ BEST_CONFIGS = [
      "entry_filter_type": "VWMA", "entry_filter_period": 14,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 21. BCH 1h — VWMA 14 (بهترین بهبود +1.57)
+    # 21. BCH 1h
     {"symbol": "BCH/USDT", "timeframe": "1h",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 14,
@@ -206,23 +202,25 @@ BEST_CONFIGS = [
      "entry_filter_type": "VWMA", "entry_filter_period": 50,
      "exit_strategy": "MACD", "exit_params": {"fast": 20, "slow": 40, "signal": 12}},
 
-    # 23. NEAR 30m — VWMA 100 (بهبود یافته +0.96)
+    # 23. NEAR 30m
     {"symbol": "NEAR/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0}},
 
-    # 24. MAGIC 1h
+    # 24. MAGIC 1h — ✅ TWEAK: exit_filter VWMA 100 (+1.42 Sharpe)
     {"symbol": "MAGIC/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 12, "mult": 2.5},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
-     "exit_strategy": "MACD", "exit_params": {"fast": 8, "slow": 17, "signal": 6}},
+     "exit_strategy": "MACD", "exit_params": {"fast": 8, "slow": 17, "signal": 6},
+     "exit_filter_type": "VWMA", "exit_filter_period": 100},
 
-    # 25. GALA 1h
+    # 25. GALA 1h — ✅ TWEAK: exit_filter HMA 7 (+2.70 Sharpe)
     {"symbol": "GALA/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 12, "mult": 2.5},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
-     "exit_strategy": "Supertrend", "exit_params": {"period": 12, "mult": 2.5}},
+     "exit_strategy": "Supertrend", "exit_params": {"period": 12, "mult": 2.5},
+     "exit_filter_type": "HMA", "exit_filter_period": 7},
 ]
 
 # ============================================================
@@ -566,7 +564,7 @@ def send_trade_stats():
                   f"🎯 WR: {wr:.1f}% | 💰 {total_pnl:+.4f} USDT\n🧪 <i>TESTNET</i>")
 
 # ============================================================
-# TRADING LOGIC — CROSS + FILTER (ENTRY + EXIT)
+# TRADING LOGIC
 # ============================================================
 def process_config(cfg):
     symbol = cfg["symbol"]
@@ -595,7 +593,7 @@ def process_config(cfg):
         cfg.get("exit_filter_period", 0)
     )
 
-    my_key = f"{symbol}|{tf}|{cfg['entry_strategy']}+{cfg.get('entry_filter_type', 'NONE')}→{cfg['exit_strategy']}"
+    my_key = f"{symbol}|{tf}|{cfg['entry_strategy']}+{cfg.get('entry_filter_type', 'NONE')}→{cfg['exit_strategy']}+{cfg.get('exit_filter_type', 'NONE')}"
 
     if contract in cooldown and time.time() - cooldown[contract] < COOLDOWN_HOURS * 3600:
         return
@@ -688,7 +686,7 @@ def process_config(cfg):
 # ============================================================
 def main():
     print("=" * 70)
-    print(f"🧪 TESTNET — FINAL 25")
+    print(f"🧪 TESTNET — FINAL 25 + 2 TWEAKS")
     print(f"⚙️ {LEVERAGE}x | {len(BEST_CONFIGS)} configs")
     print("=" * 70)
 
@@ -703,7 +701,7 @@ def main():
     _equity_cache["usdt"] = equity
     _available_cache["usdt"] = available
 
-    send_telegram(f"🧪 <b>Final 25 Scanner</b>\n"
+    send_telegram(f"🧪 <b>Final 25 + 2 Tweaks</b>\n"
                   f"💰 ${equity:.2f} | Free: ${available:.2f}\n"
                   f"⚙️ {LEVERAGE}x | 📊 {len(BEST_CONFIGS)} configs\n"
                   f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC")
