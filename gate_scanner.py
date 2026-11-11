@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — FINAL 23 (Best of All Tests)
-==============================================================
-- 23 configs = best Sharpe per asset from 300,000+ backtests
+Gate.io Futures TestNet Scanner — FINAL 25
+==========================================
+- 25 configs = best Sharpe per asset from 300,000+ backtests
 - 8 filter types: HMA, DEMA, TEMA, VWMA, ALMA, KAMA, ZLEMA, TSI
-- Independent entry & exit (cross-strategy)
-- Entry filter AND exit filter supported
+- Independent entry & exit filters
 - SL = 2.5 ATR | TP = 7.5 ATR (1:3 R:R)
 - Leverage 10x | Cooldown 4h | Risk 2% | Max Margin 20%
 
-Portfolio stats (60-day backtest):
-  Avg Return:  66.5%  |  Avg Sharpe: 7.88
-  Avg DD:      -6.0%  |  Total Trades: 624
-  TF Mix: 13×1h + 9×30m + 1×15m
+Portfolio (60-day backtest):
+  Avg Return: ~52% | Avg Sharpe: ~6.5-7.0 | Avg DD: -7.4%
+  TF Mix: 14×1h + 11×30m
 """
 
 import os, sys, json, time, requests
@@ -53,7 +51,7 @@ def send_telegram(text):
 if "testnet" not in GATE_HOST.lower():
     print("❌ SAFETY: host is not testnet!"); sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — FINAL 23 (Best of All Tests)")
+print("🧪 GATE.IO TESTNET — FINAL 25")
 
 # ============================================================
 # ⚙️ PARAMETERS
@@ -69,150 +67,162 @@ COOLDOWN_HOURS = 4
 MAX_MARGIN_PCT = 0.20
 
 # ============================================================
-# ✅ FINAL 23 CONFIGS (sorted by Sharpe)
+# ✅ FINAL 25 CONFIGS
 # ============================================================
 BEST_CONFIGS = [
-    # 1. ADA 1h — Sharpe 10.92 (کم‌ریسک‌ترین DD -2.5%)
+    # 1. ADA 1h — VWMA 100 (بهبود یافته +0.90)
     {"symbol": "ADA/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
-     "entry_filter_type": "TSI", "entry_filter_period": 25,
+     "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Volume", "exit_params": {"vol_mult": 1.5, "ma_period": 30}},
 
-    # 2. OP 1h — Sharpe 10.03
+    # 2. OP 1h
     {"symbol": "OP/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 5.0},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "QQE", "exit_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
      "exit_filter_type": "HMA", "exit_filter_period": 20},
 
-    # 3. WLD 1h — Sharpe 10.02
+    # 3. WLD 1h
     {"symbol": "WLD/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 20, "mult": 5.0},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 4. JUP 30m — Sharpe 9.04
+    # 4. JUP 30m
     {"symbol": "JUP/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 2.5},
      "entry_filter_type": "VWMA", "entry_filter_period": 50,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 5. ATOM 30m — Sharpe 8.69
+    # 5. ATOM 30m
     {"symbol": "ATOM/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 20, "mult": 5.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 6. XRP 1h — Sharpe 8.63
+    # 6. XRP 1h
     {"symbol": "XRP/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 2.5},
      "entry_filter_type": "ZLEMA", "entry_filter_period": 50,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 7. TIA 1h — Sharpe 8.44
+    # 7. TIA 1h
     {"symbol": "TIA/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 2.5},
      "entry_filter_type": "HMA", "entry_filter_period": 7,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 8. SEI 1h — Sharpe 8.34
+    # 8. SEI 1h
     {"symbol": "SEI/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},
      "entry_filter_type": "DEMA", "entry_filter_period": 50,
      "exit_strategy": "MACD", "exit_params": {"fast": 20, "slow": 40, "signal": 12}},
 
-    # 9. NEO 1h — Sharpe 8.10
+    # 9. NEO 1h
     {"symbol": "NEO/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "MACD", "exit_params": {"fast": 8, "slow": 17, "signal": 5}},
 
-    # 10. ETH 30m — Sharpe 8.08
+    # 10. ETH 30m
     {"symbol": "ETH/USDT", "timeframe": "30m",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
      "entry_filter_type": "HMA", "entry_filter_period": 20,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0},
      "exit_filter_type": "TSI", "exit_filter_period": 25},
 
-    # 11. POL 1h — Sharpe 8.05
+    # 11. POL 1h
     {"symbol": "POL/USDT", "timeframe": "1h",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
      "entry_filter_type": "ALMA", "entry_filter_period": 20,
      "exit_strategy": "MACD", "exit_params": {"fast": 8, "slow": 17, "signal": 5}},
 
-    # 12. ARB 1h — Sharpe 7.98
+    # 12. ARB 1h
     {"symbol": "ARB/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 2.5},
      "entry_filter_type": "ZLEMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 13. PEPE 30m — Sharpe 7.87
+    # 13. PEPE 30m
     {"symbol": "PEPE/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 2.5},
      "entry_filter_type": "ALMA", "entry_filter_period": 50,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 14. BONK 30m — Sharpe 7.78
+    # 14. BONK 30m
     {"symbol": "BONK/USDT", "timeframe": "30m",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 3, "factor": 3.0},
      "entry_filter_type": "ALMA", "entry_filter_period": 20,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 4.0}},
 
-    # 15. COMP 1h — Sharpe 7.47
+    # 15. COMP 1h
     {"symbol": "COMP/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 4.0}},
 
-    # 16. FIL 1h — Sharpe 7.17
+    # 16. FIL 1h
     {"symbol": "FIL/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "QQE", "exit_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0}},
 
-    # 17. GMX 1h — Sharpe 7.00
+    # 17. GMX 1h
     {"symbol": "GMX/USDT", "timeframe": "1h",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
      "entry_filter_type": "DEMA", "entry_filter_period": 30,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 18. AXS 30m — Sharpe 6.41
+    # 18. AXS 30m
     {"symbol": "AXS/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "QQE", "exit_params": {"rsi_period": 14, "smooth": 3, "factor": 3.0}},
 
-    # 19. SAND 30m — Sharpe 6.37
+    # 19. SAND 30m — VWMA 100 (بهبود یافته +0.83)
     {"symbol": "SAND/USDT", "timeframe": "30m",
      "entry_strategy": "MACD", "entry_params": {"fast": 12, "slow": 26, "signal": 9},
-     "entry_filter_type": "NONE", "entry_filter_period": 0,
+     "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0},
      "exit_filter_type": "TSI", "exit_filter_period": 25},
 
-    # 20. ORDI 30m — Sharpe 6.35
+    # 20. ORDI 30m
     {"symbol": "ORDI/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 7, "mult": 1.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 14,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 21. BCH 1h — Sharpe 6.28
+    # 21. BCH 1h — VWMA 14 (بهترین بهبود +1.57)
     {"symbol": "BCH/USDT", "timeframe": "1h",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
-     "entry_filter_type": "HMA", "entry_filter_period": 20,
+     "entry_filter_type": "VWMA", "entry_filter_period": 14,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0},
      "exit_filter_type": "TSI", "exit_filter_period": 25},
 
-    # 22. UNI 30m — Sharpe 6.28
+    # 22. UNI 30m
     {"symbol": "UNI/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 50,
      "exit_strategy": "MACD", "exit_params": {"fast": 20, "slow": 40, "signal": 12}},
 
-    # 23. NEAR 30m — Sharpe 6.02
+    # 23. NEAR 30m — VWMA 100 (بهبود یافته +0.96)
     {"symbol": "NEAR/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
-     "entry_filter_type": "KAMA", "entry_filter_period": 50,
+     "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0}},
+
+    # 24. MAGIC 1h
+    {"symbol": "MAGIC/USDT", "timeframe": "1h",
+     "entry_strategy": "Supertrend", "entry_params": {"period": 12, "mult": 2.5},
+     "entry_filter_type": "TSI", "entry_filter_period": 25,
+     "exit_strategy": "MACD", "exit_params": {"fast": 8, "slow": 17, "signal": 6}},
+
+    # 25. GALA 1h
+    {"symbol": "GALA/USDT", "timeframe": "1h",
+     "entry_strategy": "Supertrend", "entry_params": {"period": 12, "mult": 2.5},
+     "entry_filter_type": "TSI", "entry_filter_period": 25,
+     "exit_strategy": "Supertrend", "exit_params": {"period": 12, "mult": 2.5}},
 ]
 
 # ============================================================
@@ -267,77 +277,77 @@ def round_to_tick(p, t): return round(p / t) * t
 def atr(df, p=14):
     h, l, c = df["high"], df["low"], df["close"]
     tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
-    return tr.ewm(alpha=1 / p, adjust=False).mean()
+    return tr.ewm(alpha=1/p, adjust=False).mean()
 
 def rsi(s, p=14):
     d = s.diff()
-    g = d.clip(lower=0).ewm(alpha=1 / p, adjust=False).mean()
-    l = (-d.clip(upper=0)).ewm(alpha=1 / p, adjust=False).mean()
-    return 100 - 100 / (1 + g / l.replace(0, np.nan))
+    g = d.clip(lower=0).ewm(alpha=1/p, adjust=False).mean()
+    l = (-d.clip(upper=0)).ewm(alpha=1/p, adjust=False).mean()
+    return 100 - 100/(1 + g/l.replace(0, np.nan))
 
 def supertrend(df, period=10, mult=3.0):
     h, l, c = df["high"].values, df["low"].values, df["close"].values
     a = atr(df, period).values
-    hl2 = (h + l) / 2
-    up, lo = hl2 + mult * a, hl2 - mult * a
+    hl2 = (h+l)/2
+    up, lo = hl2+mult*a, hl2-mult*a
     n = len(c)
     fu, fl = np.full(n, np.nan), np.full(n, np.nan)
     trend = np.ones(n, dtype=int)
     for i in range(int(period), n):
         if np.isnan(up[i]): continue
-        if np.isnan(fu[i - 1]):
+        if np.isnan(fu[i-1]):
             fu[i], fl[i] = up[i], lo[i]
             trend[i] = 1 if c[i] > fl[i] else -1
             continue
-        fu[i] = up[i] if (up[i] < fu[i - 1] or c[i - 1] > fu[i - 1]) else fu[i - 1]
-        fl[i] = lo[i] if (lo[i] > fl[i - 1] or c[i - 1] < fl[i - 1]) else fl[i - 1]
-        trend[i] = (-1 if c[i] < fl[i] else 1) if trend[i - 1] == 1 else (1 if c[i] > fu[i] else -1)
+        fu[i] = up[i] if (up[i] < fu[i-1] or c[i-1] > fu[i-1]) else fu[i-1]
+        fl[i] = lo[i] if (lo[i] > fl[i-1] or c[i-1] < fl[i-1]) else fl[i-1]
+        trend[i] = (-1 if c[i] < fl[i] else 1) if trend[i-1] == 1 else (1 if c[i] > fu[i] else -1)
     return pd.Series(trend, index=df.index)
 
 def qqe(df, rsi_p=14, smooth=5, factor=4.236):
     c = df["close"]; r = rsi(c, rsi_p)
     rma = r.ewm(span=smooth, adjust=False).mean()
-    atr_r = rma.diff().abs().ewm(alpha=1 / (2 * rsi_p - 1), adjust=False).mean()
-    dar = atr_r * factor
+    atr_r = rma.diff().abs().ewm(alpha=1/(2*rsi_p-1), adjust=False).mean()
+    dar = atr_r*factor
     n = len(c); trend = np.zeros(n, dtype=int); trend[0] = 1
     lb, sb = np.full(n, np.nan), np.full(n, np.nan)
-    lb[0], sb[0] = rma.iloc[0] - dar.iloc[0], rma.iloc[0] + dar.iloc[0]
+    lb[0], sb[0] = rma.iloc[0]-dar.iloc[0], rma.iloc[0]+dar.iloc[0]
     rn, dn = rma.values, dar.values
     for i in range(1, n):
-        nl, ns = rn[i] - dn[i], rn[i] + dn[i]
-        lb[i] = max(lb[i - 1], nl) if (rn[i - 1] > lb[i - 1] and rn[i] > lb[i - 1]) else nl
-        sb[i] = min(sb[i - 1], ns) if (rn[i - 1] < sb[i - 1] and rn[i] < sb[i - 1]) else ns
-        if rn[i] > sb[i - 1]:   trend[i] = 1
-        elif rn[i] < lb[i - 1]: trend[i] = -1
-        else:                   trend[i] = trend[i - 1]
+        nl, ns = rn[i]-dn[i], rn[i]+dn[i]
+        lb[i] = max(lb[i-1], nl) if (rn[i-1] > lb[i-1] and rn[i] > lb[i-1]) else nl
+        sb[i] = min(sb[i-1], ns) if (rn[i-1] < sb[i-1] and rn[i] < sb[i-1]) else ns
+        if rn[i] > sb[i-1]: trend[i] = 1
+        elif rn[i] < lb[i-1]: trend[i] = -1
+        else: trend[i] = trend[i-1]
     return pd.Series(trend, index=df.index)
 
 def wma(s, p):
-    w = np.arange(1, p + 1)
-    return s.rolling(p).apply(lambda x: np.dot(x, w) / w.sum(), raw=True)
+    w = np.arange(1, p+1)
+    return s.rolling(p).apply(lambda x: np.dot(x, w)/w.sum(), raw=True)
 
 def ema(s, p): return s.ewm(span=p, adjust=False).mean()
 
 def hma(s, p):
-    hl = int(p / 2); sl = max(1, int(np.sqrt(p)))
-    return wma(2 * wma(s, hl) - wma(s, p), sl)
+    hl = int(p/2); sl = max(1, int(np.sqrt(p)))
+    return wma(2*wma(s, hl) - wma(s, p), sl)
 
 def dema(s, p):
     e1 = ema(s, p)
-    return 2 * e1 - ema(e1, p)
+    return 2*e1 - ema(e1, p)
 
 def tema(s, p):
     e1 = ema(s, p); e2 = ema(e1, p); e3 = ema(e2, p)
-    return 3 * e1 - 3 * e2 + e3
+    return 3*e1 - 3*e2 + e3
 
 def vwma(close, volume, p):
-    return (close * volume).rolling(p).sum() / volume.rolling(p).sum()
+    return (close*volume).rolling(p).sum() / volume.rolling(p).sum()
 
 def alma(s, p, offset=0.85, sigma=6):
     pi = int(p)
-    m = int(offset * (pi - 1))
-    ss = pi / sigma
-    w = np.exp(-((np.arange(pi) - m) ** 2) / (2 * ss ** 2))
+    m = int(offset*(pi-1))
+    ss = pi/sigma
+    w = np.exp(-((np.arange(pi)-m)**2)/(2*ss**2))
     w /= w.sum()
     return s.rolling(pi).apply(lambda x: np.dot(x, w), raw=True)
 
@@ -346,24 +356,24 @@ def kama(s, p=20, fast=2, slow=30):
     change = (s - s.shift(pi)).abs()
     vol = s.diff().abs().rolling(pi).sum()
     er = change / vol.replace(0, np.nan)
-    fs = 2 / (fast + 1); ss = 2 / (slow + 1)
-    sc = (er * (fs - ss) + ss) ** 2
+    fs = 2/(fast+1); ss = 2/(slow+1)
+    sc = (er*(fs-ss)+ss)**2
     scv, sv = sc.values, s.values
     kv = np.zeros(len(sv)); kv[0] = sv[0]
     for i in range(1, len(sv)):
-        if np.isnan(scv[i]): kv[i] = kv[i - 1]
-        else: kv[i] = kv[i - 1] + scv[i] * (sv[i] - kv[i - 1])
+        if np.isnan(scv[i]): kv[i] = kv[i-1]
+        else: kv[i] = kv[i-1] + scv[i]*(sv[i]-kv[i-1])
     return pd.Series(kv, index=s.index)
 
 def zlema(s, p):
-    lag = max(1, (int(p) - 1) // 2)
-    return ema(2 * s - s.shift(lag), p)
+    lag = max(1, (int(p)-1)//2)
+    return ema(2*s - s.shift(lag), p)
 
 def tsi(s, long=25, short=13):
     m = s.diff(); am = m.abs()
     sm = m.ewm(span=long, adjust=False).mean().ewm(span=short, adjust=False).mean()
     sa = am.ewm(span=long, adjust=False).mean().ewm(span=short, adjust=False).mean()
-    return 100 * (sm / sa)
+    return 100*(sm/sa)
 
 # ============================================================
 # SIGNALS
@@ -411,15 +421,15 @@ def compute_filter_val(df, ftype, period):
 
 def apply_filter(sig, close, fval, ftype):
     if fval is None or not ftype or ftype == "NONE": return sig
-    close_arr = close.values if hasattr(close, "values") else np.asarray(close)
-    fv_arr = fval.values if hasattr(fval, "values") else np.asarray(fval)
+    ca = close.values if hasattr(close, "values") else np.asarray(close)
+    fa = fval.values if hasattr(fval, "values") else np.asarray(fval)
 
     if ftype == "TSI":
-        bull = fv_arr > 0
-        bear = fv_arr < 0
+        bull = fa > 0
+        bear = fa < 0
     else:
-        bull = close_arr > fv_arr
-        bear = close_arr < fv_arr
+        bull = ca > fa
+        bear = ca < fa
 
     out = sig.copy()
     out[(sig == 1) & (~bull)] = 0
@@ -573,14 +583,12 @@ def process_config(cfg):
     pos_info = get_position_info(contract)
     current_pos = pos_info["size"] if pos_info else 0
 
-    # ✅ Entry signal with entry filter
     entry_sig = get_last_signal(
         df, cfg["entry_strategy"], cfg["entry_params"],
         cfg.get("entry_filter_type", "NONE"),
         cfg.get("entry_filter_period", 0)
     )
 
-    # ✅ Exit signal with exit filter (if any)
     exit_sig = get_last_signal(
         df, cfg["exit_strategy"], cfg["exit_params"],
         cfg.get("exit_filter_type", "NONE"),
@@ -593,7 +601,6 @@ def process_config(cfg):
         return
 
     if current_pos == 0:
-        # No position → look for entry
         if contract in state:
             cooldown[contract] = time.time(); save_json(COOLDOWN_FILE, cooldown)
             del state[contract]; save_json(STATE_FILE, state)
@@ -651,7 +658,6 @@ def process_config(cfg):
                                   f"🧪 <i>TESTNET</i>")
 
     else:
-        # Position open → check cross-strategy exit (with exit filter)
         owner = state.get(contract)
         if owner is None:
             state[contract] = my_key; save_json(STATE_FILE, state); owner = my_key
@@ -682,7 +688,7 @@ def process_config(cfg):
 # ============================================================
 def main():
     print("=" * 70)
-    print(f"🧪 TESTNET — FINAL 23 (Best of All Tests)")
+    print(f"🧪 TESTNET — FINAL 25")
     print(f"⚙️ {LEVERAGE}x | {len(BEST_CONFIGS)} configs")
     print("=" * 70)
 
@@ -697,7 +703,7 @@ def main():
     _equity_cache["usdt"] = equity
     _available_cache["usdt"] = available
 
-    send_telegram(f"🧪 <b>Final 23 Scanner</b>\n"
+    send_telegram(f"🧪 <b>Final 25 Scanner</b>\n"
                   f"💰 ${equity:.2f} | Free: ${available:.2f}\n"
                   f"⚙️ {LEVERAGE}x | 📊 {len(BEST_CONFIGS)} configs\n"
                   f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC")
