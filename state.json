@@ -5,6 +5,5 @@
   "KAS_USDT": "KAS/USDT|30m|Volume",
   "SOL_USDT": "SOL/USDT|15m|Supertrend",
   "HBAR_USDT": "HBAR/USDT|1h|MACD",
-  "UNI_USDT": "UNI/USDT|30m|Supertrend+VWMA\u2192MACD+NONE",
   "ETH_USDT": "ETH/USDT|30m|QQE+HMA\u2192Supertrend+TSI"
 }
