@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — FINAL 25 + 2 Tweaks
-=====================================================
-- 25 configs from 300,000+ backtests
-- 8 filter types: HMA, DEMA, TEMA, VWMA, ALMA, KAMA, ZLEMA, TSI
-- 2 exit-filter tweaks: MAGIC→VWMA100, GALA→HMA7 (+1.4 & +2.7 Sharpe)
-- SL = 2.5 ATR | TP = 7.5 ATR (1:3 R:R)
-- Leverage 10x | Cooldown 4h | Risk 2% | Max Margin 20%
+Gate.io Futures TestNet Scanner — FINAL 29
+==========================================
+- 25 configs from Final 25 + 2 Tweaks
+- + 4 new configs from MA Cross 60-asset test:
+    * AAVE 1h   (Sharpe 4.51, DD -7.9%)
+    * THETA 30m (Sharpe 4.36, DD -6.8%)
+    * LINK 1h   (Sharpe 4.22, DD -9.9%)
+    * DOGE 1h   (Sharpe 4.10, DD -7.6%)
+- 8 filter types + 4 MA_CROSS types (WMA, DEMA, TMA, HMA)
 """
 
 import os, sys, json, time, requests
@@ -17,16 +19,10 @@ from datetime import datetime, timezone
 from gate_api import ApiClient, Configuration, FuturesApi
 from gate_api.models import FuturesOrder, FuturesPriceTriggeredOrder, FuturesInitialOrder, FuturesPriceTrigger
 
-# ============================================================
-# 🧪 TESTNET KEYS
-# ============================================================
 API_KEY    = "b37ed23f61f92662e11ba8b247adfb3b"
 API_SECRET = "39395a011e7d170e4b955c3060692ed5bfe3f380cd470717dbbc516b03a73fea"
 GATE_HOST  = "https://api-testnet.gateapi.io/api/v4"
 
-# ============================================================
-# 📱 TELEGRAM
-# ============================================================
 TG_TOKEN   = "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo"
 TG_CHAT_ID = "254500349"
 
@@ -41,13 +37,10 @@ def send_telegram(text):
     except Exception as e:
         print(f"  [TG] Error: {e}")
 
-# ============================================================
-# 🛡️ SAFETY: only run on testnet
-# ============================================================
 if "testnet" not in GATE_HOST.lower():
     print("❌ SAFETY: host is not testnet!"); sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — FINAL 25 + 2 TWEAKS")
+print("🧪 GATE.IO TESTNET — FINAL 29")
 
 # ============================================================
 # ⚙️ PARAMETERS
@@ -63,9 +56,10 @@ COOLDOWN_HOURS = 4
 MAX_MARGIN_PCT = 0.20
 
 # ============================================================
-# ✅ FINAL 25 + 2 TWEAKS
+# ✅ FINAL 29 CONFIGS
 # ============================================================
 BEST_CONFIGS = [
+    # === 1-25: Final 25 (with 2 tweaks) ===
     # 1. ADA 1h — VWMA 100
     {"symbol": "ADA/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
@@ -208,19 +202,42 @@ BEST_CONFIGS = [
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0}},
 
-    # 24. MAGIC 1h — ✅ TWEAK: exit_filter VWMA 100 (+1.42 Sharpe)
+    # 24. MAGIC 1h — TWEAK: exit VWMA 100 (+1.42 Sharpe)
     {"symbol": "MAGIC/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 12, "mult": 2.5},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "MACD", "exit_params": {"fast": 8, "slow": 17, "signal": 6},
      "exit_filter_type": "VWMA", "exit_filter_period": 100},
 
-    # 25. GALA 1h — ✅ TWEAK: exit_filter HMA 7 (+2.70 Sharpe)
+    # 25. GALA 1h — TWEAK: exit HMA 7 (+2.70 Sharpe)
     {"symbol": "GALA/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 12, "mult": 2.5},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "Supertrend", "exit_params": {"period": 12, "mult": 2.5},
      "exit_filter_type": "HMA", "exit_filter_period": 7},
+
+    # === 26-29: New from MA Cross 60-asset test ===
+    # 26. AAVE 1h — Sharpe 4.51, DD -7.9%
+    {"symbol": "AAVE/USDT", "timeframe": "1h",
+     "entry_strategy": "HMA_CROSS", "entry_params": {"fast": 6, "slow": 19},
+     "exit_strategy": "TMA_CROSS", "exit_params": {"fast": 8, "slow": 21}},
+
+    # 27. THETA 30m — Sharpe 4.36, DD -6.8%
+    {"symbol": "THETA/USDT", "timeframe": "30m",
+     "entry_strategy": "WMA_CROSS", "entry_params": {"fast": 6, "slow": 19},
+     "entry_filter_type": "VWMA", "entry_filter_period": 50,
+     "exit_strategy": "TMA_CROSS", "exit_params": {"fast": 8, "slow": 21}},
+
+    # 28. LINK 1h — Sharpe 4.22, DD -9.9%
+    {"symbol": "LINK/USDT", "timeframe": "1h",
+     "entry_strategy": "DEMA_CROSS", "entry_params": {"fast": 8, "slow": 21},
+     "exit_strategy": "TMA_CROSS", "exit_params": {"fast": 6, "slow": 19}},
+
+    # 29. DOGE 1h — Sharpe 4.10, DD -7.6%
+    {"symbol": "DOGE/USDT", "timeframe": "1h",
+     "entry_strategy": "TMA_CROSS", "entry_params": {"fast": 2, "slow": 5},
+     "entry_filter_type": "VWMA", "entry_filter_period": 7,
+     "exit_strategy": "TMA_CROSS", "exit_params": {"fast": 8, "slow": 21}},
 ]
 
 # ============================================================
@@ -327,6 +344,7 @@ def wma(s, p):
 def ema(s, p): return s.ewm(span=p, adjust=False).mean()
 
 def hma(s, p):
+    if p < 2: p = 2
     hl = int(p/2); sl = max(1, int(np.sqrt(p)))
     return wma(2*wma(s, hl) - wma(s, p), sl)
 
@@ -337,6 +355,11 @@ def dema(s, p):
 def tema(s, p):
     e1 = ema(s, p); e2 = ema(e1, p); e3 = ema(e2, p)
     return 3*e1 - 3*e2 + e3
+
+def tma(s, p):
+    if p < 1: p = 1
+    h = (p + 1) // 2 if p % 2 else p // 2 + 1
+    return s.rolling(h).mean().rolling(h).mean()
 
 def vwma(close, volume, p):
     return (close*volume).rolling(p).sum() / volume.rolling(p).sum()
@@ -376,9 +399,31 @@ def tsi(s, long=25, short=13):
 # ============================================================
 # SIGNALS
 # ============================================================
+def get_ma_cross_signals(df, ma_type, fast, slow):
+    close = df["close"]
+    if ma_type == "WMA":
+        f = wma(close, fast); s = wma(close, slow)
+    elif ma_type == "DEMA":
+        f = dema(close, fast); s = dema(close, slow)
+    elif ma_type == "TMA":
+        f = tma(close, fast); s = tma(close, slow)
+    elif ma_type == "HMA":
+        f = hma(close, fast); s = hma(close, slow)
+    else:
+        return np.zeros(len(df), dtype=int)
+    sig = np.zeros(len(df), dtype=int)
+    sig[(f > s) & (f.shift(1) <= s.shift(1))] = 1
+    sig[(f < s) & (f.shift(1) >= s.shift(1))] = -1
+    return sig
+
 def get_strategy_signals(df, strat_type, params):
     close = df["close"]
     sig = np.zeros(len(df), dtype=int)
+
+    # MA_CROSS handling
+    if strat_type in ("WMA_CROSS", "DEMA_CROSS", "TMA_CROSS", "HMA_CROSS"):
+        ma_type = strat_type.replace("_CROSS", "")
+        return get_ma_cross_signals(df, ma_type, params["fast"], params["slow"])
 
     if strat_type == "MACD":
         fast = close.ewm(span=params["fast"], adjust=False).mean()
@@ -421,14 +466,10 @@ def apply_filter(sig, close, fval, ftype):
     if fval is None or not ftype or ftype == "NONE": return sig
     ca = close.values if hasattr(close, "values") else np.asarray(close)
     fa = fval.values if hasattr(fval, "values") else np.asarray(fval)
-
     if ftype == "TSI":
-        bull = fa > 0
-        bear = fa < 0
+        bull = fa > 0; bear = fa < 0
     else:
-        bull = ca > fa
-        bear = ca < fa
-
+        bull = ca > fa; bear = ca < fa
     out = sig.copy()
     out[(sig == 1) & (~bull)] = 0
     out[(sig == -1) & (~bear)] = 0
@@ -586,14 +627,13 @@ def process_config(cfg):
         cfg.get("entry_filter_type", "NONE"),
         cfg.get("entry_filter_period", 0)
     )
-
     exit_sig = get_last_signal(
         df, cfg["exit_strategy"], cfg["exit_params"],
         cfg.get("exit_filter_type", "NONE"),
         cfg.get("exit_filter_period", 0)
     )
 
-    my_key = f"{symbol}|{tf}|{cfg['entry_strategy']}+{cfg.get('entry_filter_type', 'NONE')}→{cfg['exit_strategy']}+{cfg.get('exit_filter_type', 'NONE')}"
+    my_key = f"{symbol}|{tf}|{cfg['entry_strategy']}+{cfg.get('entry_filter_type','NONE')}→{cfg['exit_strategy']}+{cfg.get('exit_filter_type','NONE')}"
 
     if contract in cooldown and time.time() - cooldown[contract] < COOLDOWN_HOURS * 3600:
         return
@@ -686,7 +726,7 @@ def process_config(cfg):
 # ============================================================
 def main():
     print("=" * 70)
-    print(f"🧪 TESTNET — FINAL 25 + 2 TWEAKS")
+    print(f"🧪 TESTNET — FINAL 29")
     print(f"⚙️ {LEVERAGE}x | {len(BEST_CONFIGS)} configs")
     print("=" * 70)
 
@@ -701,7 +741,7 @@ def main():
     _equity_cache["usdt"] = equity
     _available_cache["usdt"] = available
 
-    send_telegram(f"🧪 <b>Final 25 + 2 Tweaks</b>\n"
+    send_telegram(f"🧪 <b>Final 29 Scanner</b>\n"
                   f"💰 ${equity:.2f} | Free: ${available:.2f}\n"
                   f"⚙️ {LEVERAGE}x | 📊 {len(BEST_CONFIGS)} configs\n"
                   f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC")
