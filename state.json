@@ -4,7 +4,5 @@
   "KAS_USDT": "KAS/USDT|30m|Volume",
   "SOL_USDT": "SOL/USDT|15m|Supertrend",
   "HBAR_USDT": "HBAR/USDT|1h|MACD",
-  "BCH_USDT": "BCH/USDT|1h|QQE+VWMA\u2192Supertrend+TSI",
-  "PEPE_USDT": "PEPE/USDT|30m|Supertrend+ALMA\u2192Supertrend+NONE",
-  "DOGE_USDT": "DOGE/USDT|1h|TMA_CROSS+VWMA\u2192TMA_CROSS+NONE"
+  "PEPE_USDT": "PEPE/USDT|30m|Supertrend+ALMA\u2192Supertrend+NONE"
 }
