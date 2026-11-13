@@ -7,6 +7,5 @@
   "PEPE_USDT": "PEPE/USDT|30m|Supertrend+ALMA\u2192Supertrend+NONE",
   "DOGE_USDT": "DOGE/USDT|1h|TMA_CROSS+VWMA\u2192TMA_CROSS+NONE",
   "BCH_USDT": "BCH/USDT|1h|QQE+VWMA\u2192Supertrend+TSI",
-  "XRP_USDT": "XRP/USDT|1h|Supertrend+ZLEMA\u2192Supertrend+NONE",
-  "UNI_USDT": "UNI/USDT|30m|Supertrend+VWMA\u2192MACD+NONE"
+  "XRP_USDT": "XRP/USDT|1h|Supertrend+ZLEMA\u2192Supertrend+NONE"
 }
