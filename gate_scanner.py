@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — FINAL 29
-==========================================
-- 25 configs from Final 25 + 2 Tweaks
-- + 4 new configs from MA Cross 60-asset test:
-    * AAVE 1h   (Sharpe 4.51, DD -7.9%)
-    * THETA 30m (Sharpe 4.36, DD -6.8%)
-    * LINK 1h   (Sharpe 4.22, DD -9.9%)
-    * DOGE 1h   (Sharpe 4.10, DD -7.6%)
-- 8 filter types + 4 MA_CROSS types (WMA, DEMA, TMA, HMA)
+Gate.io Futures TestNet Scanner — FINAL 29 + VESPA Strategy
+==========================================================
+- Original 29 configs kept
+- + VESPA_HMA strategy (from backtests) on top coins, 4h timeframe
+- Clear strategy tags in Telegram signals
+- Auto trading + SL/TP on TestNet
 """
 
 import os, sys, json, time, requests
@@ -40,7 +37,7 @@ def send_telegram(text):
 if "testnet" not in GATE_HOST.lower():
     print("❌ SAFETY: host is not testnet!"); sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — FINAL 29")
+print("🧪 GATE.IO TESTNET — FINAL 29 + VESPA")
 
 # ============================================================
 # ⚙️ PARAMETERS
@@ -56,189 +53,217 @@ COOLDOWN_HOURS = 4
 MAX_MARGIN_PCT = 0.20
 
 # ============================================================
-# ✅ FINAL 29 CONFIGS
+# ✅ ORIGINAL FINAL 29 CONFIGS (kept)
 # ============================================================
 BEST_CONFIGS = [
     # === 1-25: Final 25 (with 2 tweaks) ===
-    # 1. ADA 1h — VWMA 100
     {"symbol": "ADA/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Volume", "exit_params": {"vol_mult": 1.5, "ma_period": 30}},
 
-    # 2. OP 1h
     {"symbol": "OP/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 5.0},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "QQE", "exit_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
      "exit_filter_type": "HMA", "exit_filter_period": 20},
 
-    # 3. WLD 1h
     {"symbol": "WLD/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 20, "mult": 5.0},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 4. JUP 30m
     {"symbol": "JUP/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 2.5},
      "entry_filter_type": "VWMA", "entry_filter_period": 50,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 5. ATOM 30m
     {"symbol": "ATOM/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 20, "mult": 5.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 6. XRP 1h
     {"symbol": "XRP/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 2.5},
      "entry_filter_type": "ZLEMA", "entry_filter_period": 50,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 7. TIA 1h
     {"symbol": "TIA/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 2.5},
      "entry_filter_type": "HMA", "entry_filter_period": 7,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 8. SEI 1h
     {"symbol": "SEI/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},
      "entry_filter_type": "DEMA", "entry_filter_period": 50,
      "exit_strategy": "MACD", "exit_params": {"fast": 20, "slow": 40, "signal": 12}},
 
-    # 9. NEO 1h
     {"symbol": "NEO/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "MACD", "exit_params": {"fast": 8, "slow": 17, "signal": 5}},
 
-    # 10. ETH 30m
     {"symbol": "ETH/USDT", "timeframe": "30m",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
      "entry_filter_type": "HMA", "entry_filter_period": 20,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0},
      "exit_filter_type": "TSI", "exit_filter_period": 25},
 
-    # 11. POL 1h
     {"symbol": "POL/USDT", "timeframe": "1h",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
      "entry_filter_type": "ALMA", "entry_filter_period": 20,
      "exit_strategy": "MACD", "exit_params": {"fast": 8, "slow": 17, "signal": 5}},
 
-    # 12. ARB 1h
     {"symbol": "ARB/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 2.5},
      "entry_filter_type": "ZLEMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 13. PEPE 30m
     {"symbol": "PEPE/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 2.5},
      "entry_filter_type": "ALMA", "entry_filter_period": 50,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 14. BONK 30m
     {"symbol": "BONK/USDT", "timeframe": "30m",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 3, "factor": 3.0},
      "entry_filter_type": "ALMA", "entry_filter_period": 20,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 4.0}},
 
-    # 15. COMP 1h
     {"symbol": "COMP/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 4.0}},
 
-    # 16. FIL 1h
     {"symbol": "FIL/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "QQE", "exit_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0}},
 
-    # 17. GMX 1h
     {"symbol": "GMX/USDT", "timeframe": "1h",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
      "entry_filter_type": "DEMA", "entry_filter_period": 30,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 18. AXS 30m
     {"symbol": "AXS/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "QQE", "exit_params": {"rsi_period": 14, "smooth": 3, "factor": 3.0}},
 
-    # 19. SAND 30m
     {"symbol": "SAND/USDT", "timeframe": "30m",
      "entry_strategy": "MACD", "entry_params": {"fast": 12, "slow": 26, "signal": 9},
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0},
      "exit_filter_type": "TSI", "exit_filter_period": 25},
 
-    # 20. ORDI 30m
     {"symbol": "ORDI/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 7, "mult": 1.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 14,
      "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
 
-    # 21. BCH 1h
     {"symbol": "BCH/USDT", "timeframe": "1h",
      "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 14,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0},
      "exit_filter_type": "TSI", "exit_filter_period": 25},
 
-    # 22. UNI 30m
     {"symbol": "UNI/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 50,
      "exit_strategy": "MACD", "exit_params": {"fast": 20, "slow": 40, "signal": 12}},
 
-    # 23. NEAR 30m
     {"symbol": "NEAR/USDT", "timeframe": "30m",
      "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
      "entry_filter_type": "VWMA", "entry_filter_period": 100,
      "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0}},
 
-    # 24. MAGIC 1h — TWEAK: exit VWMA 100 (+1.42 Sharpe)
     {"symbol": "MAGIC/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 12, "mult": 2.5},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "MACD", "exit_params": {"fast": 8, "slow": 17, "signal": 6},
      "exit_filter_type": "VWMA", "exit_filter_period": 100},
 
-    # 25. GALA 1h — TWEAK: exit HMA 7 (+2.70 Sharpe)
     {"symbol": "GALA/USDT", "timeframe": "1h",
      "entry_strategy": "Supertrend", "entry_params": {"period": 12, "mult": 2.5},
      "entry_filter_type": "TSI", "entry_filter_period": 25,
      "exit_strategy": "Supertrend", "exit_params": {"period": 12, "mult": 2.5},
      "exit_filter_type": "HMA", "exit_filter_period": 7},
 
-    # === 26-29: New from MA Cross 60-asset test ===
-    # 26. AAVE 1h — Sharpe 4.51, DD -7.9%
+    # === 26-29: MA Cross ===
     {"symbol": "AAVE/USDT", "timeframe": "1h",
      "entry_strategy": "HMA_CROSS", "entry_params": {"fast": 6, "slow": 19},
      "exit_strategy": "TMA_CROSS", "exit_params": {"fast": 8, "slow": 21}},
 
-    # 27. THETA 30m — Sharpe 4.36, DD -6.8%
     {"symbol": "THETA/USDT", "timeframe": "30m",
      "entry_strategy": "WMA_CROSS", "entry_params": {"fast": 6, "slow": 19},
      "entry_filter_type": "VWMA", "entry_filter_period": 50,
      "exit_strategy": "TMA_CROSS", "exit_params": {"fast": 8, "slow": 21}},
 
-    # 28. LINK 1h — Sharpe 4.22, DD -9.9%
     {"symbol": "LINK/USDT", "timeframe": "1h",
      "entry_strategy": "DEMA_CROSS", "entry_params": {"fast": 8, "slow": 21},
      "exit_strategy": "TMA_CROSS", "exit_params": {"fast": 6, "slow": 19}},
 
-    # 29. DOGE 1h — Sharpe 4.10, DD -7.6%
     {"symbol": "DOGE/USDT", "timeframe": "1h",
      "entry_strategy": "TMA_CROSS", "entry_params": {"fast": 2, "slow": 5},
      "entry_filter_type": "VWMA", "entry_filter_period": 7,
      "exit_strategy": "TMA_CROSS", "exit_params": {"fast": 8, "slow": 21}},
 ]
+
+# ============================================================
+# 🆕 VESPA_HMA CONFIGS (از بک‌تست‌های قوی — تایم‌فریم 4h)
+# ============================================================
+VESPA_CONFIGS = [
+    # فرمت: symbol, timeframe, vlen, vsm, hma_fast, hma_slow, thr
+    {"symbol": "FET/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 16, "vsm": 8,  "fast": 13, "slow": 36, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8,  "fast": 13, "slow": 36, "thr": 0.028}},
+
+    {"symbol": "FLOKI/USDT", "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 14, "vsm": 7,  "fast": 12, "slow": 30, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 14, "vsm": 7,  "fast": 12, "slow": 30, "thr": 0.028}},
+
+    {"symbol": "PEPE/USDT",  "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 14, "vsm": 7,  "fast": 12, "slow": 28, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 14, "vsm": 7,  "fast": 12, "slow": 28, "thr": 0.028}},
+
+    {"symbol": "XLM/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 18, "vsm": 10, "fast": 16, "slow": 40, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 18, "vsm": 10, "fast": 16, "slow": 40, "thr": 0.028}},
+
+    {"symbol": "BNCOLD/USDT","timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 20, "vsm": 12, "fast": 20, "slow": 50, "thr": 0.032},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 20, "vsm": 12, "fast": 20, "slow": 50, "thr": 0.032}},
+
+    {"symbol": "INJ/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 16, "vsm": 8,  "fast": 20, "slow": 50, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8,  "fast": 20, "slow": 50, "thr": 0.028}},
+
+    {"symbol": "AVAX/USDT",  "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 30, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 30, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028}},
+
+    {"symbol": "ADA/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 16, "vsm": 8,  "fast": 20, "slow": 50, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8,  "fast": 20, "slow": 50, "thr": 0.028}},
+
+    {"symbol": "KCS/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 20, "vsm": 12, "fast": 20, "slow": 50, "thr": 0.032},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 20, "vsm": 12, "fast": 20, "slow": 50, "thr": 0.032}},
+
+    {"symbol": "GALA/USDT",  "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 16, "vsm": 8,  "fast": 13, "slow": 34, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8,  "fast": 13, "slow": 34, "thr": 0.028}},
+
+    {"symbol": "JUP/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 16, "vsm": 8,  "fast": 13, "slow": 34, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8,  "fast": 13, "slow": 34, "thr": 0.028}},
+
+    {"symbol": "FIL/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 20, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 20, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028}},
+
+    {"symbol": "ETH/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 40, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 40, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028}},
+
+    {"symbol": "XDC/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 20, "vsm": 12, "fast": 20, "slow": 50, "thr": 0.032},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 20, "vsm": 12, "fast": 20, "slow": 50, "thr": 0.032}},
+
+    {"symbol": "ICP/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 18, "vsm": 10, "fast": 16, "slow": 40, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 18, "vsm": 10, "fast": 16, "slow": 40, "thr": 0.028}},
+
+    {"symbol": "BCH/USDT",   "timeframe": "4h", "entry_strategy": "VESPA", "entry_params": {"vlen": 20, "vsm": 12, "fast": 18, "slow": 45, "thr": 0.028},
+     "exit_strategy": "VESPA", "exit_params": {"vlen": 20, "vsm": 12, "fast": 18, "slow": 45, "thr": 0.028}},
+]
+
+# اضافه کردن کانفیگ‌های VESPA به لیست اصلی
+BEST_CONFIGS.extend(VESPA_CONFIGS)
 
 # ============================================================
 # CLIENT & CACHES
@@ -287,7 +312,7 @@ def get_contract_specs(contract):
 def round_to_tick(p, t): return round(p / t) * t
 
 # ============================================================
-# INDICATORS
+# INDICATORS (original + VESPA)
 # ============================================================
 def atr(df, p=14):
     h, l, c = df["high"], df["low"], df["close"]
@@ -396,6 +421,47 @@ def tsi(s, long=25, short=13):
     sa = am.ewm(span=long, adjust=False).mean().ewm(span=short, adjust=False).mean()
     return 100*(sm/sa)
 
+# ========== VESPA indicators ==========
+def _wma_np(a, n):
+    w = np.arange(n, 0, -1).astype(float)
+    o = np.full(len(a), np.nan)
+    if len(a) >= n:
+        o[n-1:] = np.convolve(a, w, 'valid') / w.sum()
+    return o
+
+def hma_series(s, n):
+    a = s.values.astype(float)
+    h = max(int(n / 2), 1)
+    r = max(int(np.sqrt(n)), 1)
+    d = 2 * _wma_np(a, h) - _wma_np(a, n)
+    o = np.full(len(a), np.nan)
+    if len(a) - n + 1 >= r:
+        o[n + r - 2:] = np.convolve(d[n-1:], np.arange(r, 0, -1).astype(float), 'valid') / np.arange(r, 0, -1).sum()
+    return pd.Series(o, index=s.index)
+
+def vespa_nv(df, L=20, S=12):
+    o, c, h, l, v = df['open'], df['close'], df['high'], df['low'], df['volume'].fillna(1)
+    g = o - c.shift(1)
+    b = (c - o).abs()
+    w = (h - l) - b
+    up = c > o
+    bull = w + np.where(up, b, 0) + g.clip(lower=0)
+    bear = w + np.where(up, 0, b) + (-g).clip(lower=0)
+    r = bull + bear
+    bs = np.where(r > 0, bull / r, 0.5)
+    dem = pd.Series(_wma_np(_wma_np((bs * v).values, L), S), index=df.index)
+    sup = pd.Series(_wma_np(_wma_np(((1 - bs) * v).values, L), S), index=df.index)
+    return dem - sup
+
+def io_pat(df):
+    oo = ((df['high'] >= df['high'].shift(1)) & (df['low'] <= df['low'].shift(1)) &
+          (df['high'].shift(1) >= df['high'].shift(2)) & (df['low'].shift(1) <= df['low'].shift(2)))
+    ii = ((df['high'] <= df['high'].shift(1)) & (df['low'] >= df['low'].shift(1)) &
+          (df['high'].shift(1) <= df['high'].shift(2)) & (df['low'].shift(1) >= df['low'].shift(2)))
+    ioi = ((df['high'] <= df['high'].shift(1)) & (df['low'] >= df['low'].shift(1)) &
+           (df['high'].shift(1) >= df['high'].shift(2)) & (df['low'].shift(1) <= df['low'].shift(2)))
+    return oo.fillna(False), ii.fillna(False), ioi.fillna(False)
+
 # ============================================================
 # SIGNALS
 # ============================================================
@@ -416,9 +482,49 @@ def get_ma_cross_signals(df, ma_type, fast, slow):
     sig[(f < s) & (f.shift(1) >= s.shift(1))] = -1
     return sig
 
+def get_vespa_signals(df, params):
+    """VESPA_HMA strategy signals"""
+    vlen = params.get("vlen", 20)
+    vsm  = params.get("vsm", 12)
+    fast = params.get("fast", 16)
+    slow = params.get("slow", 40)
+    thr  = params.get("thr", 0.028)
+    vw_period = params.get("vw_period", 100)
+
+    NV = vespa_nv(df, vlen, vsm)
+    HC_F = hma_series(df['close'], fast)
+    HC_S = hma_series(df['close'], slow)
+    OO, II, IOI = io_pat(df)
+    VW = (df['close'] * df['volume']).rolling(vw_period).sum() / df['volume'].rolling(vw_period).sum()
+
+    # HTF (Daily) confirmation
+    try:
+        htf = df.resample('1D').agg({'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna()
+        if len(htf) > 20:
+            NV_HTF = vespa_nv(htf, max(5, vlen//2), max(3, vsm//2)).reindex(df.index, method='ffill')
+        else:
+            NV_HTF = pd.Series(0.0, index=df.index)
+    except:
+        NV_HTF = pd.Series(0.0, index=df.index)
+
+    long_cond  = (NV > thr) & (HC_F > HC_S) & (II | IOI) & (df['close'] > VW) & (NV_HTF > thr * 0.65)
+    short_cond = (NV < -thr) & (HC_F < HC_S) & OO & (df['close'] < VW) & (NV_HTF < -thr * 0.65)
+
+    sig = np.zeros(len(df), dtype=int)
+    # Entry on new signal
+    long_entry  = long_cond & ~long_cond.shift(1).fillna(False)
+    short_entry = short_cond & ~short_cond.shift(1).fillna(False)
+    sig[long_entry]  = 1
+    sig[short_entry] = -1
+    return sig
+
 def get_strategy_signals(df, strat_type, params):
     close = df["close"]
     sig = np.zeros(len(df), dtype=int)
+
+    # VESPA strategy
+    if strat_type == "VESPA":
+        return get_vespa_signals(df, params)
 
     # MA_CROSS handling
     if strat_type in ("WMA_CROSS", "DEMA_CROSS", "TMA_CROSS", "HMA_CROSS"):
@@ -495,7 +601,7 @@ def fetch_candles(contract, tf, limit=250):
         r = requests.get(url, params={"contract": contract, "interval": tf, "limit": limit}, timeout=15)
         if r.status_code != 200: return None
         data = r.json()
-        if not data or len(data) < 100: return None
+        if not data or len(data) < 80: return None
         df = pd.DataFrame(data)
         df["t"] = pd.to_datetime(df["t"].astype(int), unit="s", utc=True)
         df = df.set_index("t").sort_index()
@@ -612,10 +718,14 @@ def process_config(cfg):
     tf = cfg["timeframe"]
 
     contract = resolve_contract(symbol)
-    if contract is None: return
+    if contract is None:
+        print(f"  ⚠️ Contract not found: {symbol}")
+        return
 
-    df = fetch_candles(contract, tf, limit=250)
-    if df is None or len(df) < 100: return
+    df = fetch_candles(contract, tf, limit=300)
+    if df is None or len(df) < 100:
+        print(f"  ⚠️ Not enough candles: {symbol} {tf}")
+        return
 
     state = load_json(STATE_FILE)
     cooldown = load_json(COOLDOWN_FILE)
@@ -633,7 +743,11 @@ def process_config(cfg):
         cfg.get("exit_filter_period", 0)
     )
 
-    my_key = f"{symbol}|{tf}|{cfg['entry_strategy']}+{cfg.get('entry_filter_type','NONE')}→{cfg['exit_strategy']}+{cfg.get('exit_filter_type','NONE')}"
+    # کلید یکتا با نام استراتژی
+    strat_tag = cfg["entry_strategy"]
+    if strat_tag == "VESPA":
+        strat_tag = "VESPA_HMA"
+    my_key = f"{symbol}|{tf}|{strat_tag}"
 
     if contract in cooldown and time.time() - cooldown[contract] < COOLDOWN_HOURS * 3600:
         return
@@ -674,26 +788,34 @@ def process_config(cfg):
             set_leverage(contract, LEVERAGE)
 
             filter_label = cfg.get("entry_filter_type", "NONE")
+            strat_name = "VESPA_HMA" if cfg["entry_strategy"] == "VESPA" else f"{cfg['entry_strategy']}+{filter_label}"
+
             if entry_sig == 1:
-                print(f"  📈 LONG {symbol} {tf} [{cfg['entry_strategy']}+{filter_label}→{cfg['exit_strategy']}]")
+                print(f"  📈 LONG {symbol} {tf} [{strat_name}]")
                 if place_market_order(contract, size):
                     state[contract] = my_key; save_json(STATE_FILE, state)
                     place_sl_tp(contract, "long", price - sl_dist, price + tp_dist, price, size)
-                    send_telegram(f"📈 <b>LONG</b> {symbol} {tf}\n"
-                                  f"🎯 {cfg['entry_strategy']}+{filter_label} → {cfg['exit_strategy']}\n"
-                                  f"💰 {price:.6f} | 📦 {size}\n"
-                                  f"🛡️ {price - sl_dist:.6f} | 🎯 {price + tp_dist:.6f}\n"
-                                  f"🧪 <i>TESTNET</i>")
+                    send_telegram(
+                        f"📈 <b>LONG</b> {symbol} {tf}\n"
+                        f"🏷 <b>Strategy: {strat_name}</b>\n"
+                        f"💰 Entry: {price:.6f} | 📦 Size: {size}\n"
+                        f"🛡️ SL: {price - sl_dist:.6f}\n"
+                        f"🎯 TP: {price + tp_dist:.6f}\n"
+                        f"🧪 <i>TESTNET</i>"
+                    )
             elif entry_sig == -1:
-                print(f"  📉 SHORT {symbol} {tf} [{cfg['entry_strategy']}+{filter_label}→{cfg['exit_strategy']}]")
+                print(f"  📉 SHORT {symbol} {tf} [{strat_name}]")
                 if place_market_order(contract, -size):
                     state[contract] = my_key; save_json(STATE_FILE, state)
                     place_sl_tp(contract, "short", price + sl_dist, price - tp_dist, price, size)
-                    send_telegram(f"📉 <b>SHORT</b> {symbol} {tf}\n"
-                                  f"🎯 {cfg['entry_strategy']}+{filter_label} → {cfg['exit_strategy']}\n"
-                                  f"💰 {price:.6f} | 📦 {size}\n"
-                                  f"🛡️ {price + sl_dist:.6f} | 🎯 {price - tp_dist:.6f}\n"
-                                  f"🧪 <i>TESTNET</i>")
+                    send_telegram(
+                        f"📉 <b>SHORT</b> {symbol} {tf}\n"
+                        f"🏷 <b>Strategy: {strat_name}</b>\n"
+                        f"💰 Entry: {price:.6f} | 📦 Size: {size}\n"
+                        f"🛡️ SL: {price + sl_dist:.6f}\n"
+                        f"🎯 TP: {price - tp_dist:.6f}\n"
+                        f"🧪 <i>TESTNET</i>"
+                    )
 
     else:
         owner = state.get(contract)
@@ -704,7 +826,8 @@ def process_config(cfg):
         should_exit = (current_pos > 0 and exit_sig == -1) or (current_pos < 0 and exit_sig == 1)
 
         if should_exit:
-            print(f"  🔄 Reverse {symbol} [exit={cfg['exit_strategy']}+{cfg.get('exit_filter_type', 'NONE')}]")
+            strat_name = "VESPA_HMA" if cfg["entry_strategy"] == "VESPA" else cfg["exit_strategy"]
+            print(f"  🔄 Exit {symbol} [{strat_name}]")
             pnl = pos_info["unrealised_pnl"]; ot = pos_info["open_time"]
             dur = "N/A"
             if ot:
@@ -716,18 +839,20 @@ def process_config(cfg):
             cooldown[contract] = time.time(); save_json(COOLDOWN_FILE, cooldown)
 
             side = "LONG" if current_pos > 0 else "SHORT"
-            send_telegram(f"🚪 <b>CLOSED</b> {side} {symbol} {tf}\n"
-                          f"🎯 {cfg['entry_strategy']} → {cfg['exit_strategy']}\n"
-                          f"⏱ {dur} | 📊 {'✅' if pnl>=0 else '❌'} {pnl:+.4f} USDT\n"
-                          f"🧪 <i>TESTNET</i>")
+            send_telegram(
+                f"🚪 <b>CLOSED</b> {side} {symbol} {tf}\n"
+                f"🏷 <b>Strategy: {strat_name}</b>\n"
+                f"⏱ {dur} | 📊 {'✅' if pnl>=0 else '❌'} {pnl:+.4f} USDT\n"
+                f"🧪 <i>TESTNET</i>"
+            )
 
 # ============================================================
 # MAIN
 # ============================================================
 def main():
     print("=" * 70)
-    print(f"🧪 TESTNET — FINAL 29")
-    print(f"⚙️ {LEVERAGE}x | {len(BEST_CONFIGS)} configs")
+    print(f"🧪 TESTNET — FINAL 29 + VESPA_HMA")
+    print(f"⚙️ {LEVERAGE}x | Total configs: {len(BEST_CONFIGS)} (29 original + {len(VESPA_CONFIGS)} VESPA)")
     print("=" * 70)
 
     try:
@@ -741,20 +866,25 @@ def main():
     _equity_cache["usdt"] = equity
     _available_cache["usdt"] = available
 
-    send_telegram(f"🧪 <b>Final 29 Scanner</b>\n"
-                  f"💰 ${equity:.2f} | Free: ${available:.2f}\n"
-                  f"⚙️ {LEVERAGE}x | 📊 {len(BEST_CONFIGS)} configs\n"
-                  f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC")
+    send_telegram(
+        f"🧪 <b>Final Scanner + VESPA_HMA</b>\n"
+        f"💰 ${equity:.2f} | Free: ${available:.2f}\n"
+        f"⚙️ {LEVERAGE}x | 📊 {len(BEST_CONFIGS)} configs\n"
+        f"🏷 VESPA coins: {len(VESPA_CONFIGS)} on 4h\n"
+        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+    )
 
     send_positions_report()
 
     for cfg in BEST_CONFIGS:
-        try: process_config(cfg)
-        except Exception as e: print(f"  ❌ {cfg['symbol']}: {e}")
+        try:
+            process_config(cfg)
+        except Exception as e:
+            print(f"  ❌ {cfg['symbol']}: {e}")
 
     send_positions_report()
     send_trade_stats()
-    print(f"\n✅ Run complete")
+    print(f"\n✅ Run complete — {len(BEST_CONFIGS)} configs checked")
 
 if __name__ == "__main__":
     main()
