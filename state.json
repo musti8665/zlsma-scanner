@@ -4,7 +4,6 @@
   "KAS_USDT": "KAS/USDT|30m|Volume",
   "SOL_USDT": "SOL/USDT|15m|Supertrend",
   "HBAR_USDT": "HBAR/USDT|1h|MACD",
-  "LINK_USDT": "LINK/USDT|1h|DEMA_CROSS",
   "BCH_USDT": "BCH/USDT|1h|QQE",
   "XRP_USDT": "XRP/USDT|1h|Supertrend",
   "AAVE_USDT": "AAVE/USDT|1h|HMA_CROSS",
