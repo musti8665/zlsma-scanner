@@ -2,9 +2,7 @@
   "BTC_USDT": "BTC/USDC|15m|MACD",
   "HYPE_USDT": "HYPE/USD|15m|QQE",
   "KAS_USDT": "KAS/USDT|30m|Volume",
-  "BCH_USDT": "BCH/USDT|1h|QQE",
   "XRP_USDT": "XRP/USDT|1h|Supertrend",
-  "ETH_USDT": "ETH/USDT|30m|QQE",
   "AAVE_USDT": "AAVE/USDT|1h|HMA_CROSS",
   "FIL_USDT": "FIL/USDT|1h|Supertrend"
 }
