@@ -8,7 +8,6 @@
   "XRP_USDT": "XRP/USDT|1h|Supertrend",
   "LINK_USDT": "LINK/USDT|1h|DEMA_CROSS",
   "ETH_USDT": "ETH/USDT|30m|QQE",
-  "FIL_USDT": "FIL/USDT|1h|Supertrend",
   "DOGE_USDT": "DOGE/USDT|1h|TMA_CROSS",
   "WLD_USDT": "WLD/USDT|1h|Supertrend"
 }
