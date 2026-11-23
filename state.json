@@ -4,5 +4,6 @@
   "KAS_USDT": "KAS/USDT|30m|Volume",
   "XRP_USDT": "XRP/USDT|1h|Supertrend",
   "AAVE_USDT": "AAVE/USDT|1h|HMA_CROSS",
-  "FIL_USDT": "FIL/USDT|1h|Supertrend"
+  "FIL_USDT": "FIL/USDT|1h|Supertrend",
+  "LINK_USDT": "LINK/USDT|1h|DEMA_CROSS"
 }
