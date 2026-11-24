@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — ALL STRATEGIES
-================================================
-1. Original strategies (Supertrend / QQE / MACD / MA Cross ...)
-2. VESPA_HMA (from previous strong backtests)
-3. SNIPER_HMA (11 strongest coins from latest sweep)
+Gate.io Futures TestNet Scanner — ALL STRATEGIES FINAL
+======================================================
+1. Original strategies (Supertrend / QQE / MACD / MA Cross)
+2. VESPA_HMA
+3. FILTER strategies (ATR_ST / ATR_RSI / ATR_ADX) — strongest from latest sweep
 
-هر استراتژی جداگانه سیگنال می‌دهد و در تلگرام کاملاً مشخص است.
+هر سیگنال و معامله در تلگرام کاملاً مشخص است.
 """
 
 import os, sys, json, time, requests
@@ -38,10 +38,10 @@ def send_telegram(text):
 if "testnet" not in GATE_HOST.lower():
     print("❌ SAFETY: host is not testnet!"); sys.exit(99)
 
-print("🧪 GATE.IO TESTNET — ALL STRATEGIES (Original + VESPA + SNIPER)")
+print("🧪 GATE.IO TESTNET — ALL STRATEGIES FINAL")
 
 # ============================================================
-# ⚙️ PARAMETERS
+# PARAMETERS
 # ============================================================
 RISK_PCT       = 0.02
 ATR_MULT_SL    = 2.5
@@ -54,7 +54,7 @@ COOLDOWN_HOURS = 4
 MAX_MARGIN_PCT = 0.20
 
 # ============================================================
-# 1) ORIGINAL CONFIGS (Supertrend / QQE / MACD / MA Cross)
+# 1) ORIGINAL CONFIGS
 # ============================================================
 ORIGINAL_CONFIGS = [
     {"symbol": "ADA/USDT", "timeframe": "1h",
@@ -108,91 +108,128 @@ ORIGINAL_CONFIGS = [
 # 2) VESPA_HMA CONFIGS
 # ============================================================
 VESPA_CONFIGS = [
-    {"symbol": "FET/USDT",   "timeframe": "4h", "entry_strategy": "VESPA",
+    {"symbol": "FET/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
      "entry_params": {"vlen": 16, "vsm": 8, "fast": 13, "slow": 36, "thr": 0.028},
      "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8, "fast": 13, "slow": 36, "thr": 0.028}},
 
-    {"symbol": "INJ/USDT",   "timeframe": "4h", "entry_strategy": "VESPA",
+    {"symbol": "INJ/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
      "entry_params": {"vlen": 16, "vsm": 8, "fast": 20, "slow": 50, "thr": 0.028},
      "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8, "fast": 20, "slow": 50, "thr": 0.028}},
 
-    {"symbol": "AVAX/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
+    {"symbol": "AVAX/USDT", "timeframe": "4h", "entry_strategy": "VESPA",
      "entry_params": {"vlen": 30, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028},
      "exit_strategy": "VESPA", "exit_params": {"vlen": 30, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028}},
 
-    {"symbol": "ADA/USDT",   "timeframe": "4h", "entry_strategy": "VESPA",
+    {"symbol": "ADA/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
      "entry_params": {"vlen": 16, "vsm": 8, "fast": 20, "slow": 50, "thr": 0.028},
      "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8, "fast": 20, "slow": 50, "thr": 0.028}},
 
-    {"symbol": "BCH/USDT",   "timeframe": "4h", "entry_strategy": "VESPA",
+    {"symbol": "BCH/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
      "entry_params": {"vlen": 20, "vsm": 12, "fast": 18, "slow": 45, "thr": 0.028},
      "exit_strategy": "VESPA", "exit_params": {"vlen": 20, "vsm": 12, "fast": 18, "slow": 45, "thr": 0.028}},
 
-    {"symbol": "ETH/USDT",   "timeframe": "4h", "entry_strategy": "VESPA",
+    {"symbol": "ETH/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
      "entry_params": {"vlen": 40, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028},
      "exit_strategy": "VESPA", "exit_params": {"vlen": 40, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028}},
 ]
 
 # ============================================================
-# 3) SNIPER_HMA — ۱۱ ارز قوی
+# 3) FILTER CONFIGS (بهترین نتایج آخرین سوئیپ)
 # ============================================================
-SENS_MAP = {
-    'VVVVS': {'mild_ob': 10, 'maj_ob': 25, 'mild_os': -10, 'maj_os': -25},
-    'VVVS' : {'mild_ob': 15, 'maj_ob': 32, 'mild_os': -18, 'maj_os': -35},
-    'VVS'  : {'mild_ob': 20, 'maj_ob': 40, 'mild_os': -28, 'maj_os': -45},
-    'VS'   : {'mild_ob': 25, 'maj_ob': 48, 'mild_os': -38, 'maj_os': -50},
-    'S'    : {'mild_ob': 30, 'maj_ob': 55, 'mild_os': -50, 'maj_os': -55},
-    'NS'   : {'mild_ob': 42, 'maj_ob': 65, 'mild_os': -60, 'maj_os': -68},
-}
+FILTER_CONFIGS = [
+    # BCH — ATR_ST NS
+    {"symbol": "BCH/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.0, "sens": "NS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.0, "sens": "NS"}},
 
-SNIPER_CONFIGS = [
-    {"symbol": "STX/USDT",  "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "HMA",  "hma_period": 80, "sens": "NS"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "HMA",  "hma_period": 80, "sens": "NS"}},
+    # COMP — ATR_RSI NS
+    {"symbol": "COMP/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"}},
 
-    {"symbol": "BCH/USDT",  "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "HMA",  "hma_period": 80, "sens": "NS"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "HMA",  "hma_period": 80, "sens": "NS"}},
+    # RUNE — ATR_ST VVVS
+    {"symbol": "RUNE/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.3, "sens": "VVVS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.3, "sens": "VVVS"}},
 
-    {"symbol": "COMP/USDT", "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "EHMA", "hma_period": 62, "sens": "S"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "EHMA", "hma_period": 62, "sens": "S"}},
+    # AAVE — ATR_ST VVS
+    {"symbol": "AAVE/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 3.0, "atr_filter": 1.0, "sens": "VVS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 3.0, "atr_filter": 1.0, "sens": "VVS"}},
 
-    {"symbol": "LINK/USDT", "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "EHMA", "hma_period": 55, "sens": "S"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "EHMA", "hma_period": 55, "sens": "S"}},
+    # UNI — ATR_RSI NS
+    {"symbol": "UNI/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_RSI", "atr_period": 14, "rsi_period": 7, "rsi_ob": 65, "rsi_os": 35, "atr_mult": 1.0, "sens": "NS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_RSI", "atr_period": 14, "rsi_period": 7, "rsi_ob": 65, "rsi_os": 35, "atr_mult": 1.0, "sens": "NS"}},
 
-    {"symbol": "SOL/USDT",  "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "EHMA", "hma_period": 50, "sens": "S"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "EHMA", "hma_period": 50, "sens": "S"}},
+    # IMX — ATR_RSI NS
+    {"symbol": "IMX/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 14, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 14, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"}},
 
-    {"symbol": "RUNE/USDT", "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "EHMA", "hma_period": 70, "sens": "S"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "EHMA", "hma_period": 70, "sens": "S"}},
+    # SNX — ATR_RSI NS
+    {"symbol": "SNX/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 65, "rsi_os": 35, "atr_mult": 1.0, "sens": "NS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 65, "rsi_os": 35, "atr_mult": 1.0, "sens": "NS"}},
 
-    {"symbol": "SHIB/USDT", "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "HMA",  "hma_period": 80, "sens": "VS"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "HMA",  "hma_period": 80, "sens": "VS"}},
+    # DOGE — ATR_ST VS
+    {"symbol": "DOGE/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 3.0, "atr_filter": 0.7, "sens": "VS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 3.0, "atr_filter": 0.7, "sens": "VS"}},
 
-    {"symbol": "HBAR/USDT", "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "EHMA", "hma_period": 80, "sens": "VVVVS"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "EHMA", "hma_period": 80, "sens": "VVVVS"}},
+    # AVAX — ATR_ST VS
+    {"symbol": "AVAX/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.5, "atr_filter": 1.0, "sens": "VS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.5, "atr_filter": 1.0, "sens": "VS"}},
 
-    {"symbol": "NEAR/USDT", "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "EHMA", "hma_period": 75, "sens": "S"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "EHMA", "hma_period": 75, "sens": "S"}},
+    # MAGIC — ATR_RSI NS
+    {"symbol": "MAGIC/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"}},
 
-    {"symbol": "DOGE/USDT", "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "EHMA", "hma_period": 45, "sens": "NS"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "EHMA", "hma_period": 45, "sens": "NS"}},
+    # APT — ATR_ADX VVVVS
+    {"symbol": "APT/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 20, "adx_thresh": 30, "atr_mult": 1.0, "sens": "VVVVS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 20, "adx_thresh": 30, "atr_mult": 1.0, "sens": "VVVVS"}},
 
-    {"symbol": "AVAX/USDT", "timeframe": "4h", "entry_strategy": "SNIPER_HMA",
-     "entry_params": {"hma_type": "EHMA", "hma_period": 80, "sens": "VS"},
-     "exit_strategy": "SNIPER_HMA", "exit_params": {"hma_type": "EHMA", "hma_period": 80, "sens": "VS"}},
+    # NEO — ATR_ADX VVS
+    {"symbol": "NEO/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 14, "adx_thresh": 30, "atr_mult": 1.0, "sens": "VVS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 14, "adx_thresh": 30, "atr_mult": 1.0, "sens": "VVS"}},
+
+    # ETH — ATR_ST VVVVS
+    {"symbol": "ETH/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 3.0, "atr_filter": 0.7, "sens": "VVVVS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 3.0, "atr_filter": 0.7, "sens": "VVVVS"}},
+
+    # SOL — ATR_ADX VVS
+    {"symbol": "SOL/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 14, "adx_thresh": 20, "atr_mult": 1.0, "sens": "VVS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 14, "adx_thresh": 20, "atr_mult": 1.0, "sens": "VVS"}},
+
+    # ENS — ATR_ST VVS
+    {"symbol": "ENS/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.0, "atr_filter": 1.0, "sens": "VVS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.0, "atr_filter": 1.0, "sens": "VVS"}},
+
+    # OP — ATR_ST VVVVS
+    {"symbol": "OP/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.5, "atr_filter": 0.7, "sens": "VVVVS"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.5, "atr_filter": 0.7, "sens": "VVVVS"}},
+
+    # LINK — ATR_ST S
+    {"symbol": "LINK/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.0, "sens": "S"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.0, "sens": "S"}},
+
+    # FIL — ATR_ADX S
+    {"symbol": "FIL/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
+     "entry_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 20, "adx_thresh": 30, "atr_mult": 1.0, "sens": "S"},
+     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 20, "adx_thresh": 30, "atr_mult": 1.0, "sens": "S"}},
 ]
 
-# همه کانفیگ‌ها با هم
-BEST_CONFIGS = ORIGINAL_CONFIGS + VESPA_CONFIGS + SNIPER_CONFIGS
+# همه کانفیگ‌ها
+BEST_CONFIGS = ORIGINAL_CONFIGS + VESPA_CONFIGS + FILTER_CONFIGS
 
 # ============================================================
 # CLIENT & CACHES
@@ -330,7 +367,20 @@ def tsi(s, long=25, short=13):
     sa = am.ewm(span=long, adjust=False).mean().ewm(span=short, adjust=False).mean()
     return 100 * (sm / sa)
 
-# VESPA
+def adx(df, n=14):
+    high, low, close = df['high'], df['low'], df['close']
+    plus_dm  = high.diff()
+    minus_dm = -low.diff()
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm < 0] = 0
+    tr = pd.concat([high-low, (high-close.shift()).abs(), (low-close.shift()).abs()], axis=1).max(axis=1)
+    atr_ = tr.rolling(n).mean()
+    plus_di  = 100 * (plus_dm.rolling(n).mean() / atr_)
+    minus_di = 100 * (minus_dm.rolling(n).mean() / atr_)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    return dx.rolling(n).mean()
+
+# VESPA helpers
 def _wma_np(a, n):
     w = np.arange(n, 0, -1).astype(float)
     o = np.full(len(a), np.nan)
@@ -371,7 +421,7 @@ def io_pat(df):
           (df['high'].shift(1)>=df['high'].shift(2))&(df['low'].shift(1)<=df['low'].shift(2)))
     return oo.fillna(False), ii.fillna(False), ioi.fillna(False)
 
-# SNIPER
+# SNIPER (kept for compatibility)
 def sniper_signals(df, mild_ob, maj_ob, mild_os, maj_os):
     ap = (df['high'] + df['low'] + df['close']) / 3
     esa = ema(ap, 20)
@@ -388,6 +438,60 @@ def sniper_signals(df, mild_ob, maj_ob, mild_os, maj_os):
     sht = ((short1 & cross) | (short2 & cross)).fillna(False)
     both = lng & sht
     return (lng & ~both), (sht & ~both)
+
+SENS_MAP = {
+    'VVVVS': {'mild_ob': 10, 'maj_ob': 25, 'mild_os': -10, 'maj_os': -25},
+    'VVVS' : {'mild_ob': 15, 'maj_ob': 32, 'mild_os': -18, 'maj_os': -35},
+    'VVS'  : {'mild_ob': 20, 'maj_ob': 40, 'mild_os': -28, 'maj_os': -45},
+    'VS'   : {'mild_ob': 25, 'maj_ob': 48, 'mild_os': -38, 'maj_os': -50},
+    'S'    : {'mild_ob': 30, 'maj_ob': 55, 'mild_os': -50, 'maj_os': -55},
+    'NS'   : {'mild_ob': 42, 'maj_ob': 65, 'mild_os': -60, 'maj_os': -68},
+}
+
+# ============================================================
+# FILTER LOGIC (new)
+# ============================================================
+def apply_filter_mask(df, params):
+    ftype = params.get("filter_type", "ATR_ST")
+    atr_series = atr(df, params.get("atr_period", 14))
+
+    if ftype == "ATR_ST":
+        st = supertrend(df, params.get("atr_period", 14), params.get("st_mult", 2.5))
+        vol_ok = atr_series >= atr_series.rolling(50).mean() * params.get("atr_filter", 1.0)
+        long_mask  = (st == 1) & vol_ok
+        short_mask = (st == -1) & vol_ok
+        return long_mask.fillna(False), short_mask.fillna(False)
+
+    elif ftype == "ATR_RSI":
+        rsi_val = rsi(df["close"], params.get("rsi_period", 14))
+        vol_ok = atr_series >= atr_series.rolling(50).mean() * params.get("atr_mult", 1.0)
+        long_mask  = (rsi_val < params.get("rsi_os", 30)) & vol_ok
+        short_mask = (rsi_val > params.get("rsi_ob", 70)) & vol_ok
+        return long_mask.fillna(False), short_mask.fillna(False)
+
+    elif ftype == "ATR_ADX":
+        adx_val = adx(df, params.get("adx_period", 14))
+        strong = adx_val >= params.get("adx_thresh", 25)
+        vol_ok = atr_series >= atr_series.rolling(50).mean() * params.get("atr_mult", 1.0)
+        long_mask  = strong & vol_ok & (df["close"] > df["close"].shift(1))
+        short_mask = strong & vol_ok & (df["close"] < df["close"].shift(1))
+        return long_mask.fillna(False), short_mask.fillna(False)
+
+    return pd.Series(False, index=df.index), pd.Series(False, index=df.index)
+
+def get_filter_signals(df, params):
+    sens_name = params.get("sens", "S")
+    sens = SENS_MAP.get(sens_name, SENS_MAP["S"])
+    long_s, short_s = sniper_signals(df, **sens)
+    long_f, short_f = apply_filter_mask(df, params)
+
+    long_final  = long_s & long_f
+    short_final = short_s & short_f
+
+    sig = np.zeros(len(df), dtype=int)
+    sig[long_final  & ~long_final.shift(1).fillna(False)]  = 1
+    sig[short_final & ~short_final.shift(1).fillna(False)] = -1
+    return sig
 
 # ============================================================
 # SIGNALS
@@ -432,28 +536,11 @@ def get_vespa_signals(df, params):
     sig[short_cond & ~short_cond.shift(1).fillna(False)] = -1
     return sig
 
-def get_sniper_hma_signals(df, params):
-    hma_type = params.get("hma_type", "HMA")
-    hma_period = int(params.get("hma_period", 62))
-    sens_name = params.get("sens", "S")
-    sens = SENS_MAP.get(sens_name, SENS_MAP['S'])
-
-    long_sig, short_sig = sniper_signals(df, **sens)
-    hma_line = ehma(df['close'], hma_period) if hma_type == "EHMA" else hma(df['close'], hma_period)
-
-    long_final  = long_sig  & (df['close'] > hma_line)
-    short_final = short_sig & (df['close'] < hma_line)
-
-    sig = np.zeros(len(df), dtype=int)
-    sig[long_final  & ~long_final.shift(1).fillna(False)]  = 1
-    sig[short_final & ~short_final.shift(1).fillna(False)] = -1
-    return sig
-
 def get_strategy_signals(df, strat_type, params):
     if strat_type == "VESPA":
         return get_vespa_signals(df, params)
-    if strat_type == "SNIPER_HMA":
-        return get_sniper_hma_signals(df, params)
+    if strat_type == "FILTER":
+        return get_filter_signals(df, params)
     if strat_type in ("WMA_CROSS", "DEMA_CROSS", "TMA_CROSS", "HMA_CROSS"):
         return get_ma_cross_signals(df, strat_type.replace("_CROSS",""), params["fast"], params["slow"])
 
@@ -515,7 +602,7 @@ def get_last_signal(df, strat, params, ftype="NONE", fperiod=0):
     return int(filtered[-1])
 
 # ============================================================
-# DATA & ACCOUNT + ORDERS + REPORTS (same as before)
+# DATA & ACCOUNT + ORDERS + REPORTS
 # ============================================================
 def fetch_candles(contract, tf, limit=300):
     key = (contract, tf)
@@ -652,12 +739,14 @@ def process_config(cfg):
     exit_sig  = get_last_signal(df, cfg["exit_strategy"],  cfg["exit_params"],
                                 cfg.get("exit_filter_type","NONE"), cfg.get("exit_filter_period",0))
 
-    # تگ استراتژی برای تلگرام و state
+    # تگ استراتژی برای تلگرام
     strat = cfg["entry_strategy"]
     if strat == "VESPA":
         strat_tag = "VESPA_HMA"
-    elif strat == "SNIPER_HMA":
-        strat_tag = "SNIPER_HMA"
+    elif strat == "FILTER":
+        ftype = cfg["entry_params"].get("filter_type", "FILTER")
+        sens  = cfg["entry_params"].get("sens", "")
+        strat_tag = f"FILTER_{ftype}_{sens}"
     else:
         filt = cfg.get("entry_filter_type", "NONE")
         strat_tag = f"{strat}+{filt}" if filt != "NONE" else strat
@@ -754,48 +843,4 @@ def process_config(cfg):
                 f"🚪 <b>CLOSED</b> {side} {symbol} {tf}\n"
                 f"🏷 <b>Strategy: {strat_tag}</b>\n"
                 f"⏱ {dur} | 📊 {'✅' if pnl>=0 else '❌'} {pnl:+.4f} USDT\n"
-                f"🧪 <i>TESTNET</i>"
-            )
-
-# ============================================================
-# MAIN
-# ============================================================
-def main():
-    print("=" * 70)
-    print(f"🧪 TESTNET — ALL STRATEGIES")
-    print(f"⚙️ Original: {len(ORIGINAL_CONFIGS)} | VESPA: {len(VESPA_CONFIGS)} | SNIPER: {len(SNIPER_CONFIGS)}")
-    print(f"⚙️ Total configs: {len(BEST_CONFIGS)}")
-    print("=" * 70)
-
-    try:
-        acc = futures_api.list_futures_accounts("usdt")
-        equity = float(acc.total)
-        available = float(acc.available) if hasattr(acc, "available") else 0.0
-        print(f"\n✅ Equity: {equity:.2f} | Available: {available:.2f}\n")
-    except Exception as e:
-        print(f"❌ {e}"); send_telegram(f"❌ Connection: {e}"); sys.exit(1)
-
-    _equity_cache["usdt"] = equity
-    _available_cache["usdt"] = available
-
-    send_telegram(
-        f"🧪 <b>All Strategies Scanner</b>\n"
-        f"💰 ${equity:.2f} | Free: ${available:.2f}\n"
-        f"📊 Original: {len(ORIGINAL_CONFIGS)} | VESPA: {len(VESPA_CONFIGS)} | SNIPER: {len(SNIPER_CONFIGS)}\n"
-        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
-    )
-
-    send_positions_report()
-
-    for cfg in BEST_CONFIGS:
-        try:
-            process_config(cfg)
-        except Exception as e:
-            print(f"  ❌ {cfg['symbol']}: {e}")
-
-    send_positions_report()
-    send_trade_stats()
-    print(f"\n✅ Run complete — {len(BEST_CONFIGS)} configs checked")
-
-if __name__ == "__main__":
-    main()
+                f"🧪 <i>TESTdescription
