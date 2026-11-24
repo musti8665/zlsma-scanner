@@ -843,4 +843,48 @@ def process_config(cfg):
                 f"🚪 <b>CLOSED</b> {side} {symbol} {tf}\n"
                 f"🏷 <b>Strategy: {strat_tag}</b>\n"
                 f"⏱ {dur} | 📊 {'✅' if pnl>=0 else '❌'} {pnl:+.4f} USDT\n"
-                f"🧪 <i>TESTdescription
+                f"🧪 <i>TESTNET</i>"
+            )
+
+# ============================================================
+# MAIN
+# ============================================================
+def main():
+    print("=" * 70)
+    print(f"🧪 TESTNET — ALL STRATEGIES FINAL")
+    print(f"⚙️ Original: {len(ORIGINAL_CONFIGS)} | VESPA: {len(VESPA_CONFIGS)} | FILTER: {len(FILTER_CONFIGS)}")
+    print(f"⚙️ Total configs: {len(BEST_CONFIGS)}")
+    print("=" * 70)
+
+    try:
+        acc = futures_api.list_futures_accounts("usdt")
+        equity = float(acc.total)
+        available = float(acc.available) if hasattr(acc, "available") else 0.0
+        print(f"\n✅ Equity: {equity:.2f} | Available: {available:.2f}\n")
+    except Exception as e:
+        print(f"❌ {e}"); send_telegram(f"❌ Connection: {e}"); sys.exit(1)
+
+    _equity_cache["usdt"] = equity
+    _available_cache["usdt"] = available
+
+    send_telegram(
+        f"🧪 <b>All Strategies Scanner FINAL</b>\n"
+        f"💰 ${equity:.2f} | Free: ${available:.2f}\n"
+        f"📊 Original: {len(ORIGINAL_CONFIGS)} | VESPA: {len(VESPA_CONFIGS)} | FILTER: {len(FILTER_CONFIGS)}\n"
+        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+    )
+
+    send_positions_report()
+
+    for cfg in BEST_CONFIGS:
+        try:
+            process_config(cfg)
+        except Exception as e:
+            print(f"  ❌ {cfg['symbol']}: {e}")
+
+    send_positions_report()
+    send_trade_stats()
+    print(f"\n✅ Run complete — {len(BEST_CONFIGS)} configs checked")
+
+if __name__ == "__main__":
+    main()
