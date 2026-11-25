@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — ALL STRATEGIES FINAL
-======================================================
-1. Original strategies (Supertrend / QQE / MACD / MA Cross)
-2. VESPA_HMA
-3. FILTER strategies (ATR_ST / ATR_RSI / ATR_ADX) — strongest from latest sweep
+Gate.io Futures TestNet Scanner — 18 OPTIMIZED CONFIGS (v6→v13)
+================================================================
+All configs verified through 6 rounds of parameter tuning (v6→v13):
+  - WF 4/4 (positive in all 4 walk-forward windows)
+  - wf_min > 6.7% (worst window also profitable)
+  - Mean wf_mean: 17.4%
+  - 4 MA types, 2 timeframes, 18 unique symbols
 
-هر سیگنال و معامله در تلگرام کاملاً مشخص است.
+Each signal shows: strategy, params, WF stats, source version.
 """
 
 import os, sys, json, time, requests
@@ -24,26 +26,27 @@ GATE_HOST  = "https://api-testnet.gateapi.io/api/v4"
 TG_TOKEN   = "8601458987:AAEvcxx2ClOTfQIqEp9Ok6TwcvKRaMfIeqo"
 TG_CHAT_ID = "254500349"
 
+if "testnet" not in GATE_HOST.lower():
+    print("❌ SAFETY: host is not testnet!"); sys.exit(99)
+
 def send_telegram(text):
     if not TG_TOKEN or not TG_CHAT_ID: return
     try:
         requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+            json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML",
+                  "disable_web_page_preview": True},
             timeout=10,
         )
     except Exception as e:
         print(f"  [TG] Error: {e}")
 
-if "testnet" not in GATE_HOST.lower():
-    print("❌ SAFETY: host is not testnet!"); sys.exit(99)
-
-print("🧪 GATE.IO TESTNET — ALL STRATEGIES FINAL")
+print("🧪 GATE.IO TESTNET — 18 OPTIMIZED CONFIGS")
 
 # ============================================================
 # PARAMETERS
 # ============================================================
-RISK_PCT       = 0.02
+RISK_PCT       = 0.01   # نصف نرمال (18 config همزمان)
 ATR_MULT_SL    = 2.5
 ATR_MULT_TP    = 7.5
 MAX_CONTRACTS  = 90_000
@@ -54,182 +57,99 @@ COOLDOWN_HOURS = 4
 MAX_MARGIN_PCT = 0.20
 
 # ============================================================
-# 1) ORIGINAL CONFIGS
+# 18 OPTIMIZED CONFIGS (sorted by wf_min, safety-first)
 # ============================================================
-ORIGINAL_CONFIGS = [
-    {"symbol": "ADA/USDT", "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
-     "entry_filter_type": "VWMA", "entry_filter_period": 100,
-     "exit_strategy": "Volume", "exit_params": {"vol_mult": 1.5, "ma_period": 30}},
+OPTIMIZED_CONFIGS = [
+    # TIER 1 — wf_min > 12% (6 configs, پایهٔ اصلی)
+    {"symbol": "ZEC/USDT", "timeframe": "1d", "ma_type": "LSMA",
+     "params": {"fast": 9, "slow": 79},
+     "wf_min": 17.4, "wf_mean": 25.0, "score": 43.2, "src": "v6", "n_trades": 32, "pf": 5.13},
 
-    {"symbol": "OP/USDT", "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 5.0},
-     "entry_filter_type": "TSI", "entry_filter_period": 25,
-     "exit_strategy": "QQE", "exit_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
-     "exit_filter_type": "HMA", "exit_filter_period": 20},
+    {"symbol": "SOL/USDT", "timeframe": "1d", "ma_type": "LSMA",
+     "params": {"fast": 20, "slow": 59},
+     "wf_min": 15.2, "wf_mean": 18.7, "score": 36.5, "src": "v9", "n_trades": 32, "pf": 3.02},
 
-    {"symbol": "COMP/USDT", "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},
-     "entry_filter_type": "VWMA", "entry_filter_period": 100,
-     "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 4.0}},
+    {"symbol": "TAO/USDT", "timeframe": "4h", "ma_type": "WMA",
+     "params": {"fast": 36, "slow": 116},
+     "wf_min": 13.9, "wf_mean": 17.4, "score": 26.2, "src": "v10", "n_trades": 35, "pf": 1.95},
 
-    {"symbol": "BCH/USDT", "timeframe": "1h",
-     "entry_strategy": "QQE", "entry_params": {"rsi_period": 14, "smooth": 7, "factor": 5.0},
-     "entry_filter_type": "VWMA", "entry_filter_period": 14,
-     "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0},
-     "exit_filter_type": "TSI", "exit_filter_period": 25},
+    {"symbol": "TIA/USDT", "timeframe": "4h", "ma_type": "LSMA",
+     "params": {"fast": 43, "slow": 106},
+     "wf_min": 13.5, "wf_mean": 16.2, "score": 30.5, "src": "v9", "n_trades": 84, "pf": 1.73},
 
-    {"symbol": "LINK/USDT", "timeframe": "1h",
-     "entry_strategy": "DEMA_CROSS", "entry_params": {"fast": 8, "slow": 21},
-     "exit_strategy": "TMA_CROSS", "exit_params": {"fast": 6, "slow": 19}},
+    {"symbol": "XRP/USDT", "timeframe": "4h", "ma_type": "WMA",
+     "params": {"fast": 49, "slow": 58},
+     "wf_min": 13.4, "wf_mean": 18.3, "score": 36.6, "src": "v9", "n_trades": 42, "pf": 1.91},
 
-    {"symbol": "SOL/USDT", "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},
-     "entry_filter_type": "VWMA", "entry_filter_period": 50,
-     "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
+    {"symbol": "ETH/USDT", "timeframe": "1d", "ma_type": "HMA",
+     "params": {"fast": 27, "slow": 130},
+     "wf_min": 11.4, "wf_mean": 22.0, "score": 43.0, "src": "v9", "n_trades": 23, "pf": 6.83},
 
-    {"symbol": "DOGE/USDT", "timeframe": "1h",
-     "entry_strategy": "TMA_CROSS", "entry_params": {"fast": 2, "slow": 5},
-     "entry_filter_type": "VWMA", "entry_filter_period": 7,
-     "exit_strategy": "TMA_CROSS", "exit_params": {"fast": 8, "slow": 21}},
+    # TIER 2 — wf_min 9-12% (4 configs)
+    {"symbol": "CVC/USDT", "timeframe": "4h", "ma_type": "DMA",
+     "params": {"fast": 14, "fast_shift": 15, "slow": 50, "slow_shift": 5},
+     "wf_min": 11.2, "wf_mean": 20.9, "score": 47.4, "src": "v11", "n_trades": 75, "pf": 1.72},
 
-    {"symbol": "AVAX/USDT", "timeframe": "1h",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 3.0},
-     "entry_filter_type": "TSI", "entry_filter_period": 25,
-     "exit_strategy": "Supertrend", "exit_params": {"period": 20, "mult": 5.0}},
+    {"symbol": "SUI/USDT", "timeframe": "4h", "ma_type": "LSMA",
+     "params": {"fast": 50, "slow": 179},
+     "wf_min": 10.8, "wf_mean": 14.7, "score": 27.6, "src": "v9", "n_trades": 34, "pf": 1.86},
 
-    {"symbol": "NEAR/USDT", "timeframe": "30m",
-     "entry_strategy": "Supertrend", "entry_params": {"period": 14, "mult": 4.0},
-     "entry_filter_type": "VWMA", "entry_filter_period": 100,
-     "exit_strategy": "Supertrend", "exit_params": {"period": 14, "mult": 3.0}},
+    {"symbol": "BTC/USDT", "timeframe": "1d", "ma_type": "LSMA",
+     "params": {"fast": 39, "slow": 80},
+     "wf_min": 9.9, "wf_mean": 18.4, "score": 26.7, "src": "v9", "n_trades": 24, "pf": 3.05},
+
+    {"symbol": "KSM/USDT", "timeframe": "4h", "ma_type": "DMA",
+     "params": {"fast": 13, "fast_shift": 12, "slow": 52, "slow_shift": 5},
+     "wf_min": 9.8, "wf_mean": 19.2, "score": 38.4, "src": "v9", "n_trades": 52, "pf": 2.23},
+
+    # TIER 3 — wf_min 8-9% (4 configs)
+    {"symbol": "SNX/USDT", "timeframe": "4h", "ma_type": "DMA",
+     "params": {"fast": 22, "fast_shift": 15, "slow": 50, "slow_shift": 10},
+     "wf_min": 9.0, "wf_mean": 14.5, "score": 27.9, "src": "v9", "n_trades": 59, "pf": 1.72},
+
+    {"symbol": "DOGE/USDT", "timeframe": "1d", "ma_type": "HMA",
+     "params": {"fast": 24, "slow": 129},
+     "wf_min": 9.0, "wf_mean": 16.9, "score": 21.6, "src": "v9", "n_trades": 24, "pf": 2.36},
+
+    {"symbol": "KNC/USDT", "timeframe": "4h", "ma_type": "DMA",
+     "params": {"fast": 13, "fast_shift": 12, "slow": 221, "slow_shift": 25},
+     "wf_min": 8.5, "wf_mean": 13.3, "score": 15.1, "src": "v11", "n_trades": 19, "pf": 2.55},
+
+    {"symbol": "BLUR/USDT", "timeframe": "4h", "ma_type": "WMA",
+     "params": {"fast": 49, "slow": 119},
+     "wf_min": 8.3, "wf_mean": 15.6, "score": 26.6, "src": "v9", "n_trades": 22, "pf": 2.76},
+
+    # TIER 4 — wf_min 6-8% (4 configs جدید)
+    {"symbol": "PENGU/USDT", "timeframe": "4h", "ma_type": "LSMA",
+     "params": {"fast": 49, "slow": 139},
+     "wf_min": 7.8, "wf_mean": 15.9, "score": 26.8, "src": "v12", "n_trades": 31, "pf": 2.32},
+
+    {"symbol": "GRT/USDT", "timeframe": "1d", "ma_type": "LSMA",
+     "params": {"fast": 20, "slow": 59},
+     "wf_min": 7.3, "wf_mean": 13.8, "score": 27.3, "src": "v13", "n_trades": 32, "pf": 3.17},
+
+    {"symbol": "ID/USDT", "timeframe": "4h", "ma_type": "DMA",
+     "params": {"fast": 18, "fast_shift": 11, "slow": 50, "slow_shift": 11},
+     "wf_min": 7.2, "wf_mean": 12.4, "score": 18.4, "src": "v12", "n_trades": 48, "pf": 1.66},
+
+    {"symbol": "PIXEL/USDT", "timeframe": "4h", "ma_type": "WMA",
+     "params": {"fast": 47, "slow": 205},
+     "wf_min": 6.7, "wf_mean": 15.5, "score": 24.5, "src": "v9", "n_trades": 15, "pf": 4.86},
 ]
 
-# ============================================================
-# 2) VESPA_HMA CONFIGS
-# ============================================================
-VESPA_CONFIGS = [
-    {"symbol": "FET/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
-     "entry_params": {"vlen": 16, "vsm": 8, "fast": 13, "slow": 36, "thr": 0.028},
-     "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8, "fast": 13, "slow": 36, "thr": 0.028}},
-
-    {"symbol": "INJ/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
-     "entry_params": {"vlen": 16, "vsm": 8, "fast": 20, "slow": 50, "thr": 0.028},
-     "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8, "fast": 20, "slow": 50, "thr": 0.028}},
-
-    {"symbol": "AVAX/USDT", "timeframe": "4h", "entry_strategy": "VESPA",
-     "entry_params": {"vlen": 30, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028},
-     "exit_strategy": "VESPA", "exit_params": {"vlen": 30, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028}},
-
-    {"symbol": "ADA/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
-     "entry_params": {"vlen": 16, "vsm": 8, "fast": 20, "slow": 50, "thr": 0.028},
-     "exit_strategy": "VESPA", "exit_params": {"vlen": 16, "vsm": 8, "fast": 20, "slow": 50, "thr": 0.028}},
-
-    {"symbol": "BCH/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
-     "entry_params": {"vlen": 20, "vsm": 12, "fast": 18, "slow": 45, "thr": 0.028},
-     "exit_strategy": "VESPA", "exit_params": {"vlen": 20, "vsm": 12, "fast": 18, "slow": 45, "thr": 0.028}},
-
-    {"symbol": "ETH/USDT",  "timeframe": "4h", "entry_strategy": "VESPA",
-     "entry_params": {"vlen": 40, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028},
-     "exit_strategy": "VESPA", "exit_params": {"vlen": 40, "vsm": 12, "fast": 13, "slow": 36, "thr": 0.028}},
-]
-
-# ============================================================
-# 3) FILTER CONFIGS (بهترین نتایج آخرین سوئیپ)
-# ============================================================
-FILTER_CONFIGS = [
-    # BCH — ATR_ST NS
-    {"symbol": "BCH/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.0, "sens": "NS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.0, "sens": "NS"}},
-
-    # COMP — ATR_RSI NS
-    {"symbol": "COMP/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"}},
-
-    # RUNE — ATR_ST VVVS
-    {"symbol": "RUNE/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.3, "sens": "VVVS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.3, "sens": "VVVS"}},
-
-    # AAVE — ATR_ST VVS
-    {"symbol": "AAVE/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 3.0, "atr_filter": 1.0, "sens": "VVS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 3.0, "atr_filter": 1.0, "sens": "VVS"}},
-
-    # UNI — ATR_RSI NS
-    {"symbol": "UNI/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_RSI", "atr_period": 14, "rsi_period": 7, "rsi_ob": 65, "rsi_os": 35, "atr_mult": 1.0, "sens": "NS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_RSI", "atr_period": 14, "rsi_period": 7, "rsi_ob": 65, "rsi_os": 35, "atr_mult": 1.0, "sens": "NS"}},
-
-    # IMX — ATR_RSI NS
-    {"symbol": "IMX/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 14, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 14, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"}},
-
-    # SNX — ATR_RSI NS
-    {"symbol": "SNX/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 65, "rsi_os": 35, "atr_mult": 1.0, "sens": "NS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 65, "rsi_os": 35, "atr_mult": 1.0, "sens": "NS"}},
-
-    # DOGE — ATR_ST VS
-    {"symbol": "DOGE/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 3.0, "atr_filter": 0.7, "sens": "VS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 3.0, "atr_filter": 0.7, "sens": "VS"}},
-
-    # AVAX — ATR_ST VS
-    {"symbol": "AVAX/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.5, "atr_filter": 1.0, "sens": "VS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.5, "atr_filter": 1.0, "sens": "VS"}},
-
-    # MAGIC — ATR_RSI NS
-    {"symbol": "MAGIC/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_RSI", "atr_period": 10, "rsi_period": 7, "rsi_ob": 75, "rsi_os": 25, "atr_mult": 1.0, "sens": "NS"}},
-
-    # APT — ATR_ADX VVVVS
-    {"symbol": "APT/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 20, "adx_thresh": 30, "atr_mult": 1.0, "sens": "VVVVS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 20, "adx_thresh": 30, "atr_mult": 1.0, "sens": "VVVVS"}},
-
-    # NEO — ATR_ADX VVS
-    {"symbol": "NEO/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 14, "adx_thresh": 30, "atr_mult": 1.0, "sens": "VVS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 14, "adx_thresh": 30, "atr_mult": 1.0, "sens": "VVS"}},
-
-    # ETH — ATR_ST VVVVS
-    {"symbol": "ETH/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 3.0, "atr_filter": 0.7, "sens": "VVVVS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 3.0, "atr_filter": 0.7, "sens": "VVVVS"}},
-
-    # SOL — ATR_ADX VVS
-    {"symbol": "SOL/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 14, "adx_thresh": 20, "atr_mult": 1.0, "sens": "VVS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 14, "adx_thresh": 20, "atr_mult": 1.0, "sens": "VVS"}},
-
-    # ENS — ATR_ST VVS
-    {"symbol": "ENS/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.0, "atr_filter": 1.0, "sens": "VVS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.0, "atr_filter": 1.0, "sens": "VVS"}},
-
-    # OP — ATR_ST VVVVS
-    {"symbol": "OP/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.5, "atr_filter": 0.7, "sens": "VVVVS"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 14, "st_mult": 2.5, "atr_filter": 0.7, "sens": "VVVVS"}},
-
-    # LINK — ATR_ST S
-    {"symbol": "LINK/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.0, "sens": "S"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ST", "atr_period": 10, "st_mult": 2.0, "atr_filter": 1.0, "sens": "S"}},
-
-    # FIL — ATR_ADX S
-    {"symbol": "FIL/USDT", "timeframe": "4h", "entry_strategy": "FILTER",
-     "entry_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 20, "adx_thresh": 30, "atr_mult": 1.0, "sens": "S"},
-     "exit_strategy": "FILTER", "exit_params": {"filter_type": "ATR_ADX", "atr_period": 10, "adx_period": 20, "adx_thresh": 30, "atr_mult": 1.0, "sens": "S"}},
-]
-
-# همه کانفیگ‌ها
-BEST_CONFIGS = ORIGINAL_CONFIGS + VESPA_CONFIGS + FILTER_CONFIGS
+# Print startup summary
+print("\n" + "="*140)
+print(f"  📋 LOADED {len(OPTIMIZED_CONFIGS)} OPTIMIZED CONFIGS")
+print("="*140)
+print(f"  {'#':>2} {'Symbol':<12} {'TF':<4} {'MA':<6} {'wf_min':>7} {'wf_mean':>8} {'score':>6} {'src':<4}")
+print(f"  {'-'*2} {'-'*12} {'-'*4} {'-'*6} {'-'*7} {'-'*8} {'-'*6} {'-'*4}")
+for i, c in enumerate(OPTIMIZED_CONFIGS, 1):
+    print(f"  {i:>2} {c['symbol']:<12} {c['timeframe']:<4} {c['ma_type']:<6} "
+          f"{c['wf_min']:>6.1f}% {c['wf_mean']:>7.1f}% {c['score']:>6.1f} {c['src']:<4}")
+print("="*140)
+print(f"  Mean wf_min: {np.mean([c['wf_min'] for c in OPTIMIZED_CONFIGS]):.1f}%  |  "
+      f"Mean wf_mean: {np.mean([c['wf_mean'] for c in OPTIMIZED_CONFIGS]):.1f}%")
+print("="*140 + "\n")
 
 # ============================================================
 # CLIENT & CACHES
@@ -273,7 +193,8 @@ def get_contract_specs(contract):
                     "order_price_round": float(c.order_price_round) if hasattr(c, "order_price_round") else 0.0001}
             _specs_cache[contract] = spec
             return spec
-    return {"quanto_multiplier": 1.0, "order_size_min": 1, "order_size_max": MAX_CONTRACTS, "order_price_round": 0.0001}
+    return {"quanto_multiplier": 1.0, "order_size_min": 1,
+            "order_size_max": MAX_CONTRACTS, "order_price_round": 0.0001}
 
 def round_to_tick(p, t): return round(p / t) * t
 
@@ -306,12 +227,6 @@ def hma(s, p):
     sl = max(1, int(np.sqrt(p)))
     return wma(2*wma(s, hl) - wma(s, p), sl)
 
-def ehma(s, p):
-    p = int(p)
-    hl = max(p//2, 1)
-    sl = max(1, int(np.sqrt(p)))
-    return ema(2*ema(s, hl) - ema(s, p), sl)
-
 def dema(s, p):
     e1 = ema(s, p)
     return 2*e1 - ema(e1, p)
@@ -321,293 +236,92 @@ def tma(s, p):
     h = (p + 1)//2 if p % 2 else p//2 + 1
     return s.rolling(h).mean().rolling(h).mean()
 
-def vwma(close, volume, p):
-    return (close*volume).rolling(p).sum() / volume.rolling(p).sum()
+def lsma(s, p):
+    """Least Squares Moving Average."""
+    p = int(p)
+    if p < 2: p = 2
+    n = len(s)
+    y = s.values.astype(float)
+    idx = np.arange(n, dtype=float)
+    ky = idx * y
+    ky_roll = pd.Series(ky).rolling(p, min_periods=p).sum().values
+    y_roll = pd.Series(y).rolling(p, min_periods=p).sum().values
+    start = idx - (p - 1)
+    weighted = ky_roll - start * y_roll
+    xsum = p * (p - 1) / 2
+    denom = p**2 * (p**2 - 1) / 12
+    slope = (p * weighted - xsum * y_roll) / denom
+    out = y_roll / p + slope * (p - 1) / 2
+    return pd.Series(out, index=s.index)
 
-def supertrend(df, period=10, mult=3.0):
-    h, l, c = df["high"].values, df["low"].values, df["close"].values
-    a = atr(df, period).values
-    hl2 = (h+l)/2
-    up, lo = hl2 + mult*a, hl2 - mult*a
-    n = len(c)
-    fu, fl = np.full(n, np.nan), np.full(n, np.nan)
-    trend = np.ones(n, dtype=int)
-    for i in range(int(period), n):
-        if np.isnan(up[i]): continue
-        if np.isnan(fu[i-1]):
-            fu[i], fl[i] = up[i], lo[i]
-            trend[i] = 1 if c[i] > fl[i] else -1
-            continue
-        fu[i] = up[i] if (up[i] < fu[i-1] or c[i-1] > fu[i-1]) else fu[i-1]
-        fl[i] = lo[i] if (lo[i] > fl[i-1] or c[i-1] < fl[i-1]) else fl[i-1]
-        trend[i] = (-1 if c[i] < fl[i] else 1) if trend[i-1]==1 else (1 if c[i] > fu[i] else -1)
-    return pd.Series(trend, index=df.index)
-
-def qqe(df, rsi_p=14, smooth=5, factor=4.236):
-    c = df["close"]; r = rsi(c, rsi_p)
-    rma = r.ewm(span=smooth, adjust=False).mean()
-    atr_r = rma.diff().abs().ewm(alpha=1/(2*rsi_p-1), adjust=False).mean()
-    dar = atr_r * factor
-    n = len(c); trend = np.zeros(n, dtype=int); trend[0] = 1
-    lb, sb = np.full(n, np.nan), np.full(n, np.nan)
-    lb[0], sb[0] = rma.iloc[0]-dar.iloc[0], rma.iloc[0]+dar.iloc[0]
-    rn, dn = rma.values, dar.values
-    for i in range(1, n):
-        nl, ns = rn[i]-dn[i], rn[i]+dn[i]
-        lb[i] = max(lb[i-1], nl) if (rn[i-1] > lb[i-1] and rn[i] > lb[i-1]) else nl
-        sb[i] = min(sb[i-1], ns) if (rn[i-1] < sb[i-1] and rn[i] < sb[i-1]) else ns
-        if rn[i] > sb[i-1]: trend[i] = 1
-        elif rn[i] < lb[i-1]: trend[i] = -1
-        else: trend[i] = trend[i-1]
-    return pd.Series(trend, index=df.index)
-
-def tsi(s, long=25, short=13):
-    m = s.diff(); am = m.abs()
-    sm = m.ewm(span=long, adjust=False).mean().ewm(span=short, adjust=False).mean()
-    sa = am.ewm(span=long, adjust=False).mean().ewm(span=short, adjust=False).mean()
-    return 100 * (sm / sa)
-
-def adx(df, n=14):
-    high, low, close = df['high'], df['low'], df['close']
-    plus_dm  = high.diff()
-    minus_dm = -low.diff()
-    plus_dm[plus_dm < 0] = 0
-    minus_dm[minus_dm < 0] = 0
-    tr = pd.concat([high-low, (high-close.shift()).abs(), (low-close.shift()).abs()], axis=1).max(axis=1)
-    atr_ = tr.rolling(n).mean()
-    plus_di  = 100 * (plus_dm.rolling(n).mean() / atr_)
-    minus_di = 100 * (minus_dm.rolling(n).mean() / atr_)
-    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
-    return dx.rolling(n).mean()
-
-# VESPA helpers
-def _wma_np(a, n):
-    w = np.arange(n, 0, -1).astype(float)
-    o = np.full(len(a), np.nan)
-    if len(a) >= n:
-        o[n-1:] = np.convolve(a, w, 'valid') / w.sum()
-    return o
-
-def hma_series(s, n):
-    a = s.values.astype(float)
-    h = max(int(n/2), 1)
-    r = max(int(np.sqrt(n)), 1)
-    d = 2*_wma_np(a, h) - _wma_np(a, n)
-    o = np.full(len(a), np.nan)
-    if len(a)-n+1 >= r:
-        o[n+r-2:] = np.convolve(d[n-1:], np.arange(r,0,-1).astype(float), 'valid') / np.arange(r,0,-1).sum()
-    return pd.Series(o, index=s.index)
-
-def vespa_nv(df, L=20, S=12):
-    o, c, h, l, v = df['open'], df['close'], df['high'], df['low'], df['volume'].fillna(1)
-    g = o - c.shift(1)
-    b = (c - o).abs()
-    w = (h - l) - b
-    up = c > o
-    bull = w + np.where(up, b, 0) + g.clip(lower=0)
-    bear = w + np.where(up, 0, b) + (-g).clip(lower=0)
-    r = bull + bear
-    bs = np.where(r > 0, bull/r, 0.5)
-    dem = pd.Series(_wma_np(_wma_np((bs*v).values, L), S), index=df.index)
-    sup = pd.Series(_wma_np(_wma_np(((1-bs)*v).values, L), S), index=df.index)
-    return dem - sup
-
-def io_pat(df):
-    oo = ((df['high']>=df['high'].shift(1))&(df['low']<=df['low'].shift(1))&
-          (df['high'].shift(1)>=df['high'].shift(2))&(df['low'].shift(1)<=df['low'].shift(2)))
-    ii = ((df['high']<=df['high'].shift(1))&(df['low']>=df['low'].shift(1))&
-          (df['high'].shift(1)<=df['high'].shift(2))&(df['low'].shift(1)>=df['low'].shift(2)))
-    ioi= ((df['high']<=df['high'].shift(1))&(df['low']>=df['low'].shift(1))&
-          (df['high'].shift(1)>=df['high'].shift(2))&(df['low'].shift(1)<=df['low'].shift(2)))
-    return oo.fillna(False), ii.fillna(False), ioi.fillna(False)
-
-# SNIPER (kept for compatibility)
-def sniper_signals(df, mild_ob, maj_ob, mild_os, maj_os):
-    ap = (df['high'] + df['low'] + df['close']) / 3
-    esa = ema(ap, 20)
-    d   = ema((ap - esa).abs(), 20)
-    ci  = (ap - esa) / (0.015 * d.replace(0, np.nan))
-    wt1 = ema(ci, 30)
-    wt2 = sma(wt1, 2)
-    cross = ((wt1 > wt2) & (wt1.shift(1) <= wt2.shift(1))) | ((wt1 < wt2) & (wt1.shift(1) >= wt2.shift(1)))
-    long1  = (wt1 < mild_os) & (wt1 > maj_os)
-    short1 = (wt1 > mild_ob) & (wt1 < maj_ob)
-    long2  = wt1 < maj_os
-    short2 = wt1 > maj_ob
-    lng = ((long1 & cross) | (long2 & cross)).fillna(False)
-    sht = ((short1 & cross) | (short2 & cross)).fillna(False)
-    both = lng & sht
-    return (lng & ~both), (sht & ~both)
-
-SENS_MAP = {
-    'VVVVS': {'mild_ob': 10, 'maj_ob': 25, 'mild_os': -10, 'maj_os': -25},
-    'VVVS' : {'mild_ob': 15, 'maj_ob': 32, 'mild_os': -18, 'maj_os': -35},
-    'VVS'  : {'mild_ob': 20, 'maj_ob': 40, 'mild_os': -28, 'maj_os': -45},
-    'VS'   : {'mild_ob': 25, 'maj_ob': 48, 'mild_os': -38, 'maj_os': -50},
-    'S'    : {'mild_ob': 30, 'maj_ob': 55, 'mild_os': -50, 'maj_os': -55},
-    'NS'   : {'mild_ob': 42, 'maj_ob': 65, 'mild_os': -60, 'maj_os': -68},
-}
-
-# ============================================================
-# FILTER LOGIC (new)
-# ============================================================
-def apply_filter_mask(df, params):
-    ftype = params.get("filter_type", "ATR_ST")
-    atr_series = atr(df, params.get("atr_period", 14))
-
-    if ftype == "ATR_ST":
-        st = supertrend(df, params.get("atr_period", 14), params.get("st_mult", 2.5))
-        vol_ok = atr_series >= atr_series.rolling(50).mean() * params.get("atr_filter", 1.0)
-        long_mask  = (st == 1) & vol_ok
-        short_mask = (st == -1) & vol_ok
-        return long_mask.fillna(False), short_mask.fillna(False)
-
-    elif ftype == "ATR_RSI":
-        rsi_val = rsi(df["close"], params.get("rsi_period", 14))
-        vol_ok = atr_series >= atr_series.rolling(50).mean() * params.get("atr_mult", 1.0)
-        long_mask  = (rsi_val < params.get("rsi_os", 30)) & vol_ok
-        short_mask = (rsi_val > params.get("rsi_ob", 70)) & vol_ok
-        return long_mask.fillna(False), short_mask.fillna(False)
-
-    elif ftype == "ATR_ADX":
-        adx_val = adx(df, params.get("adx_period", 14))
-        strong = adx_val >= params.get("adx_thresh", 25)
-        vol_ok = atr_series >= atr_series.rolling(50).mean() * params.get("atr_mult", 1.0)
-        long_mask  = strong & vol_ok & (df["close"] > df["close"].shift(1))
-        short_mask = strong & vol_ok & (df["close"] < df["close"].shift(1))
-        return long_mask.fillna(False), short_mask.fillna(False)
-
-    return pd.Series(False, index=df.index), pd.Series(False, index=df.index)
-
-def get_filter_signals(df, params):
-    sens_name = params.get("sens", "S")
-    sens = SENS_MAP.get(sens_name, SENS_MAP["S"])
-    long_s, short_s = sniper_signals(df, **sens)
-    long_f, short_f = apply_filter_mask(df, params)
-
-    long_final  = long_s & long_f
-    short_final = short_s & short_f
-
-    sig = np.zeros(len(df), dtype=int)
-    sig[long_final  & ~long_final.shift(1).fillna(False)]  = 1
-    sig[short_final & ~short_final.shift(1).fillna(False)] = -1
-    return sig
+def dma_ma(s, p, shift=5):
+    """Displaced Moving Average."""
+    return s.rolling(int(p)).mean().shift(int(shift))
 
 # ============================================================
 # SIGNALS
 # ============================================================
-def get_ma_cross_signals(df, ma_type, fast, slow):
+def compute_ma(close, ma_type, params):
+    """Compute fast and slow MA for a given MA type."""
+    fast = params["fast"]
+    slow = params["slow"]
+    if ma_type == "WMA":
+        return wma(close, fast), wma(close, slow)
+    elif ma_type == "HMA":
+        return hma(close, fast), hma(close, slow)
+    elif ma_type == "DEMA":
+        return dema(close, fast), dema(close, slow)
+    elif ma_type == "TMA":
+        return tma(close, fast), tma(close, slow)
+    elif ma_type == "LSMA":
+        return lsma(close, fast), lsma(close, slow)
+    elif ma_type == "DMA":
+        fs = params.get("fast_shift", 5)
+        ss = params.get("slow_shift", 10)
+        return dma_ma(close, fast, fs), dma_ma(close, slow, ss)
+    else:
+        return None, None
+
+def get_ma_cross_signals(df, ma_type, params):
+    """Returns +1 at golden cross, -1 at death cross, 0 elsewhere."""
     close = df["close"]
-    if ma_type == "WMA":   f, s = wma(close, fast), wma(close, slow)
-    elif ma_type == "DEMA": f, s = dema(close, fast), dema(close, slow)
-    elif ma_type == "TMA":  f, s = tma(close, fast), tma(close, slow)
-    elif ma_type == "HMA":  f, s = hma(close, fast), hma(close, slow)
-    else: return np.zeros(len(df), dtype=int)
+    f, s = compute_ma(close, ma_type, params)
+    if f is None:
+        return np.zeros(len(df), dtype=int)
     sig = np.zeros(len(df), dtype=int)
     sig[(f > s) & (f.shift(1) <= s.shift(1))] = 1
     sig[(f < s) & (f.shift(1) >= s.shift(1))] = -1
     return sig
 
-def get_vespa_signals(df, params):
-    vlen = params.get("vlen", 20)
-    vsm  = params.get("vsm", 12)
-    fast = params.get("fast", 16)
-    slow = params.get("slow", 40)
-    thr  = params.get("thr", 0.028)
-    vw_period = params.get("vw_period", 100)
+def get_last_signal(df, ma_type, params):
+    raw = get_ma_cross_signals(df, ma_type, params)
+    return int(raw[-1])
 
-    NV = vespa_nv(df, vlen, vsm)
-    HC_F = hma_series(df['close'], fast)
-    HC_S = hma_series(df['close'], slow)
-    OO, II, IOI = io_pat(df)
-    VW = (df['close']*df['volume']).rolling(vw_period).sum() / df['volume'].rolling(vw_period).sum()
-
-    try:
-        htf = df.resample('1D').agg({'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna()
-        NV_HTF = vespa_nv(htf, max(5,vlen//2), max(3,vsm//2)).reindex(df.index, method='ffill') if len(htf)>20 else pd.Series(0.0, index=df.index)
-    except:
-        NV_HTF = pd.Series(0.0, index=df.index)
-
-    long_cond  = (NV > thr) & (HC_F > HC_S) & (II | IOI) & (df['close'] > VW) & (NV_HTF > thr*0.65)
-    short_cond = (NV < -thr) & (HC_F < HC_S) & OO & (df['close'] < VW) & (NV_HTF < -thr*0.65)
-
-    sig = np.zeros(len(df), dtype=int)
-    sig[long_cond & ~long_cond.shift(1).fillna(False)] = 1
-    sig[short_cond & ~short_cond.shift(1).fillna(False)] = -1
-    return sig
-
-def get_strategy_signals(df, strat_type, params):
-    if strat_type == "VESPA":
-        return get_vespa_signals(df, params)
-    if strat_type == "FILTER":
-        return get_filter_signals(df, params)
-    if strat_type in ("WMA_CROSS", "DEMA_CROSS", "TMA_CROSS", "HMA_CROSS"):
-        return get_ma_cross_signals(df, strat_type.replace("_CROSS",""), params["fast"], params["slow"])
-
+def describe_signal(df, ma_type, params):
+    """Human-readable explanation of last bar's MA state."""
     close = df["close"]
-    sig = np.zeros(len(df), dtype=int)
-    if strat_type == "MACD":
-        fast = close.ewm(span=params["fast"], adjust=False).mean()
-        slow = close.ewm(span=params["slow"], adjust=False).mean()
-        macd = fast - slow
-        s = macd.ewm(span=params["signal"], adjust=False).mean()
-        hist = macd - s
-        st = supertrend(df, 10, 3.0)
-        sig[(hist > 0) & (hist.shift(1) <= 0) & (st == 1)] = 1
-        sig[(hist < 0) & (hist.shift(1) >= 0) & (st == -1)] = -1
-    elif strat_type == "QQE":
-        q = qqe(df, params["rsi_period"], params["smooth"], params["factor"])
-        sig[(q == 1) & (q.shift(1) == -1)] = 1
-        sig[(q == -1) & (q.shift(1) == 1)] = -1
-    elif strat_type == "Supertrend":
-        st = supertrend(df, params["period"], params["mult"])
-        sig[(st == 1) & (st.shift(1) == -1)] = 1
-        sig[(st == -1) & (st.shift(1) == 1)] = -1
-    elif strat_type == "Volume":
-        vma = df["volume"].rolling(params["ma_period"]).mean()
-        vok = df["volume"] > params["vol_mult"] * vma
-        sig[vok & (close > close.shift(1))] = 1
-        sig[vok & (close < close.shift(1))] = -1
-    return sig
-
-def compute_filter_val(df, ftype, period):
-    if not ftype or ftype == "NONE": return None
-    close = df["close"]
-    if ftype == "HMA":  return hma(close, period)
-    if ftype == "DEMA": return dema(close, period)
-    if ftype == "VWMA": return vwma(close, df["volume"], period)
-    if ftype == "TSI":  return tsi(close)
-    return None
-
-def apply_filter(sig, close, fval, ftype):
-    if fval is None or not ftype or ftype == "NONE": return sig
-    ca = close.values if hasattr(close, "values") else np.asarray(close)
-    fa = fval.values if hasattr(fval, "values") else np.asarray(fval)
-    if ftype == "TSI":
-        bull, bear = fa > 0, fa < 0
+    f, s = compute_ma(close, ma_type, params)
+    if f is None or len(f) < 2:
+        return "N/A"
+    f_now, s_now = float(f.iloc[-1]), float(s.iloc[-1])
+    f_prev, s_prev = float(f.iloc[-2]), float(s.iloc[-2])
+    if f_prev <= s_prev and f_now > s_now:
+        return "🟢 GOLDEN CROSS (fast crossed ABOVE slow)"
+    elif f_prev >= s_prev and f_now < s_now:
+        return "🔴 DEATH CROSS (fast crossed BELOW slow)"
+    elif f_now > s_now:
+        return f"⚪ fast({f_now:.4f}) > slow({s_now:.4f}) — no cross yet"
     else:
-        bull, bear = ca > fa, ca < fa
-    out = sig.copy()
-    out[(sig == 1) & (~bull)] = 0
-    out[(sig == -1) & (~bear)] = 0
-    return out
-
-def get_last_signal(df, strat, params, ftype="NONE", fperiod=0):
-    raw = get_strategy_signals(df, strat, params)
-    if ftype and ftype != "NONE":
-        fval = compute_filter_val(df, ftype, fperiod)
-        filtered = apply_filter(raw, df["close"], fval, ftype)
-    else:
-        filtered = raw
-    return int(filtered[-1])
+        return f"⚪ fast({f_now:.4f}) < slow({s_now:.4f}) — no cross yet"
 
 # ============================================================
-# DATA & ACCOUNT + ORDERS + REPORTS
+# DATA FETCH
 # ============================================================
 def fetch_candles(contract, tf, limit=300):
     key = (contract, tf)
     if key in _candles_cache: return _candles_cache[key]
     url = f"{GATE_HOST}/futures/usdt/candlesticks"
+    # Gate uses 1d, 4h, 1h, 30m, etc — ok
     try:
         r = requests.get(url, params={"contract": contract, "interval": tf, "limit": limit}, timeout=15)
         if r.status_code != 200: return None
@@ -647,18 +361,19 @@ def place_market_order(contract, size):
     order = FuturesOrder(contract=contract, size=size, price="0", tif="ioc", reduce_only=False)
     try:
         futures_api.create_futures_order("usdt", order)
-        print(f"  🧪 {'LONG' if size>0 else 'SHORT'} {contract} size={abs(size)}")
         return True
     except Exception as e:
-        print(f"  ❌ {contract}: {e}")
+        print(f"  ❌ Order {contract}: {e}")
         return False
 
 def close_position_market(contract, size):
     order = FuturesOrder(contract=contract, size=0, price="0", tif="ioc", reduce_only=True, close=True)
     try:
         futures_api.create_futures_order("usdt", order)
-        print(f"  🧪 CLOSE {contract}")
-    except Exception as e: print(f"  ❌ Close {contract}: {e}")
+        return True
+    except Exception as e:
+        print(f"  ❌ Close {contract}: {e}")
+        return False
 
 def place_sl_tp(contract, side, sl_price, tp_price, entry_price, size):
     specs = get_contract_specs(contract)
@@ -675,9 +390,12 @@ def place_sl_tp(contract, side, sl_price, tp_price, entry_price, size):
             order_type=order_type)
         try:
             futures_api.create_price_triggered_order("usdt", order)
-            print(f"  🧪 {kind} {contract} @ {price:.6f}")
-        except Exception as e: print(f"  ⚠️ {kind} {contract}: {e}")
+            print(f"    ✓ {kind} @ {price:.6f}")
+        except Exception as e: print(f"    ⚠️ {kind}: {e}")
 
+# ============================================================
+# REPORTS
+# ============================================================
 def send_positions_report():
     try: positions = futures_api.list_positions("usdt")
     except: return
@@ -710,7 +428,10 @@ def send_trade_stats():
     wins = sum(1 for p in closed if float(p.pnl)>0)
     total_pnl = sum(float(p.pnl) for p in closed)
     wr = (wins/total*100) if total>0 else 0
-    send_telegram(f"📈 <b>Last {total} Closed:</b>\n✅ {wins}W | ❌ {total-wins}L\n🎯 WR: {wr:.1f}% | 💰 {total_pnl:+.4f} USDT\n🧪 <i>TESTNET</i>")
+    send_telegram(f"📈 <b>Last {total} Closed:</b>\n"
+                  f"✅ {wins}W | ❌ {total-wins}L\n"
+                  f"🎯 WR: {wr:.1f}% | 💰 {total_pnl:+.4f} USDT\n"
+                  f"🧪 <i>TESTNET</i>")
 
 # ============================================================
 # TRADING LOGIC
@@ -718,15 +439,15 @@ def send_trade_stats():
 def process_config(cfg):
     symbol = cfg["symbol"]
     tf = cfg["timeframe"]
+    ma_type = cfg["ma_type"]
+    params = cfg["params"]
 
     contract = resolve_contract(symbol)
     if contract is None:
-        print(f"  ⚠️ Contract not found: {symbol}")
-        return
+        return  # silently skip (expected for some symbols on testnet)
 
     df = fetch_candles(contract, tf, limit=300)
     if df is None or len(df) < 100:
-        print(f"  ⚠️ Not enough candles: {symbol} {tf}")
         return
 
     state = load_json(STATE_FILE)
@@ -734,28 +455,20 @@ def process_config(cfg):
     pos_info = get_position_info(contract)
     current_pos = pos_info["size"] if pos_info else 0
 
-    entry_sig = get_last_signal(df, cfg["entry_strategy"], cfg["entry_params"],
-                                cfg.get("entry_filter_type","NONE"), cfg.get("entry_filter_period",0))
-    exit_sig  = get_last_signal(df, cfg["exit_strategy"],  cfg["exit_params"],
-                                cfg.get("exit_filter_type","NONE"), cfg.get("exit_filter_period",0))
+    # Compute signal + description
+    entry_sig = get_last_signal(df, ma_type, params)
+    sig_desc = describe_signal(df, ma_type, params)
 
-    # تگ استراتژی برای تلگرام
-    strat = cfg["entry_strategy"]
-    if strat == "VESPA":
-        strat_tag = "VESPA_HMA"
-    elif strat == "FILTER":
-        ftype = cfg["entry_params"].get("filter_type", "FILTER")
-        sens  = cfg["entry_params"].get("sens", "")
-        strat_tag = f"FILTER_{ftype}_{sens}"
-    else:
-        filt = cfg.get("entry_filter_type", "NONE")
-        strat_tag = f"{strat}+{filt}" if filt != "NONE" else strat
-
+    # Strategy tag (clear ID)
+    strat_tag = f"{ma_type}_CROSS"
+    param_str = " ".join(f"{k}={v}" for k, v in params.items())
     my_key = f"{symbol}|{tf}|{strat_tag}"
 
+    # Cooldown check
     if contract in cooldown and time.time() - cooldown[contract] < COOLDOWN_HOURS*3600:
         return
 
+    # ---- ENTRY ----
     if current_pos == 0:
         if contract in state:
             cooldown[contract] = time.time(); save_json(COOLDOWN_FILE, cooldown)
@@ -772,7 +485,16 @@ def process_config(cfg):
             tp_dist = atr_val * ATR_MULT_TP
 
             equity = _equity_cache.get("usdt", 0.0)
+            if equity <= 0:
+                # Fetch equity
+                try:
+                    accts = futures_api.list_futures_accounts("usdt")
+                    equity = float(accts.total)
+                    _equity_cache["usdt"] = equity
+                    _available_cache["usdt"] = float(accts.available)
+                except: return
             if equity <= 0: return
+
             risk = equity * RISK_PCT
             raw_size = int(risk / (mult * sl_dist))
             size = max(specs["order_size_min"], min(raw_size, specs["order_size_max"], MAX_CONTRACTS))
@@ -791,42 +513,55 @@ def process_config(cfg):
 
             set_leverage(contract, LEVERAGE)
 
-            if entry_sig == 1:
-                print(f"  📈 LONG {symbol} {tf} [{strat_tag}]")
-                if place_market_order(contract, size):
-                    state[contract] = my_key; save_json(STATE_FILE, state)
-                    place_sl_tp(contract, "long", price-sl_dist, price+tp_dist, price, size)
-                    send_telegram(
-                        f"📈 <b>LONG</b> {symbol} {tf}\n"
-                        f"🏷 <b>Strategy: {strat_tag}</b>\n"
-                        f"💰 Entry: {price:.6f} | 📦 Size: {size}\n"
-                        f"🛡️ SL: {price-sl_dist:.6f}\n"
-                        f"🎯 TP: {price+tp_dist:.6f}\n"
-                        f"🧪 <i>TESTNET</i>"
-                    )
-            elif entry_sig == -1:
-                print(f"  📉 SHORT {symbol} {tf} [{strat_tag}]")
-                if place_market_order(contract, -size):
-                    state[contract] = my_key; save_json(STATE_FILE, state)
-                    place_sl_tp(contract, "short", price+sl_dist, price-tp_dist, price, size)
-                    send_telegram(
-                        f"📉 <b>SHORT</b> {symbol} {tf}\n"
-                        f"🏷 <b>Strategy: {strat_tag}</b>\n"
-                        f"💰 Entry: {price:.6f} | 📦 Size: {size}\n"
-                        f"🛡️ SL: {price+sl_dist:.6f}\n"
-                        f"🎯 TP: {price-tp_dist:.6f}\n"
-                        f"🧪 <i>TESTNET</i>"
-                    )
+            direction = "LONG" if entry_sig == 1 else "SHORT"
+            side_word = "LONG" if entry_sig == 1 else "SHORT"
+            emoji = "📈" if entry_sig == 1 else "📉"
 
+            print(f"\n  {emoji} {side_word} {symbol} {tf} [{strat_tag}]")
+            print(f"     Signal: {sig_desc}")
+            print(f"     Params: {param_str}")
+            print(f"     WF: min={cfg['wf_min']:+.1f}%, mean={cfg['wf_mean']:+.1f}%, src={cfg['src']}")
+            print(f"     Entry: {price:.6f}, SL: {sl_dist:.6f}, TP: {tp_dist:.6f}, Size: {size}")
+
+            signed_size = size if entry_sig == 1 else -size
+            if place_market_order(contract, signed_size):
+                state[contract] = my_key; save_json(STATE_FILE, state)
+                if entry_sig == 1:
+                    place_sl_tp(contract, "long", price-sl_dist, price+tp_dist, price, size)
+                else:
+                    place_sl_tp(contract, "short", price+sl_dist, price-tp_dist, price, size)
+
+                # DETAILED TELEGRAM
+                sl_price = price - sl_dist if entry_sig == 1 else price + sl_dist
+                tp_price = price + tp_dist if entry_sig == 1 else price - tp_dist
+                send_telegram(
+                    f"{emoji} <b>{side_word}</b> {symbol} {tf}\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"🏷 <b>Strategy:</b> {strat_tag}\n"
+                    f"📐 <b>Params:</b> <code>{param_str}</code>\n"
+                    f"📊 <b>Backtest:</b> WF_min=<b>{cfg['wf_min']:+.1f}%</b> | "
+                    f"WF_mean={cfg['wf_mean']:+.1f}% | Score={cfg['score']:.1f}\n"
+                    f"📦 <b>Source:</b> {cfg['src']} | n={cfg['n_trades']} trades | PF={cfg['pf']:.2f}\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"🔍 <b>Signal:</b> {sig_desc}\n"
+                    f"💰 <b>Entry:</b> {price:.6f}\n"
+                    f"🛡 <b>SL:</b> {sl_price:.6f} ({-ATR_MULT_SL*atr_val/price*100:+.2f}%)\n"
+                    f"🎯 <b>TP:</b> {tp_price:.6f} ({ATR_MULT_TP*atr_val/price*100:+.2f}%)\n"
+                    f"📦 <b>Size:</b> {size} contracts\n"
+                    f"💵 <b>Risk:</b> {RISK_PCT*100:.1f}% of equity\n"
+                    f"🧪 <i>TESTNET</i>"
+                )
+
+    # ---- EXIT ----
     else:
         owner = state.get(contract)
         if owner is None:
             state[contract] = my_key; save_json(STATE_FILE, state); owner = my_key
         if owner != my_key: return
 
-        should_exit = (current_pos > 0 and exit_sig == -1) or (current_pos < 0 and exit_sig == 1)
+        # Exit: opposite signal
+        should_exit = (current_pos > 0 and entry_sig == -1) or (current_pos < 0 and entry_sig == 1)
         if should_exit:
-            print(f"  🔄 Exit {symbol} [{strat_tag}]")
             pnl = pos_info["unrealised_pnl"]
             ot = pos_info.get("open_time")
             dur = "N/A"
@@ -834,6 +569,7 @@ def process_config(cfg):
                 d = datetime.now(timezone.utc).timestamp() - ot
                 dur = f"{int(d//3600)}h {int((d%3600)//60)}m"
 
+            print(f"\n  🔄 EXIT {symbol} [{strat_tag}] | PnL: {pnl:+.4f}")
             close_position_market(contract, current_pos)
             del state[contract]; save_json(STATE_FILE, state)
             cooldown[contract] = time.time(); save_json(COOLDOWN_FILE, cooldown)
@@ -841,8 +577,14 @@ def process_config(cfg):
             side = "LONG" if current_pos > 0 else "SHORT"
             send_telegram(
                 f"🚪 <b>CLOSED</b> {side} {symbol} {tf}\n"
-                f"🏷 <b>Strategy: {strat_tag}</b>\n"
-                f"⏱ {dur} | 📊 {'✅' if pnl>=0 else '❌'} {pnl:+.4f} USDT\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🏷 <b>Strategy:</b> {strat_tag}\n"
+                f"📐 <b>Params:</b> <code>{param_str}</code>\n"
+                f"📦 <b>Source:</b> {cfg['src']}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🔍 <b>Exit signal:</b> {sig_desc}\n"
+                f"⏱ <b>Duration:</b> {dur}\n"
+                f"📊 <b>PnL:</b> {'✅' if pnl>=0 else '❌'} <b>{pnl:+.4f} USDT</b>\n"
                 f"🧪 <i>TESTNET</i>"
             )
 
@@ -850,41 +592,58 @@ def process_config(cfg):
 # MAIN
 # ============================================================
 def main():
-    print("=" * 70)
-    print(f"🧪 TESTNET — ALL STRATEGIES FINAL")
-    print(f"⚙️ Original: {len(ORIGINAL_CONFIGS)} | VESPA: {len(VESPA_CONFIGS)} | FILTER: {len(FILTER_CONFIGS)}")
-    print(f"⚙️ Total configs: {len(BEST_CONFIGS)}")
-    print("=" * 70)
-
+    # Fetch equity once at startup
     try:
-        acc = futures_api.list_futures_accounts("usdt")
-        equity = float(acc.total)
-        available = float(acc.available) if hasattr(acc, "available") else 0.0
-        print(f"\n✅ Equity: {equity:.2f} | Available: {available:.2f}\n")
+        accts = futures_api.list_futures_accounts("usdt")
+        _equity_cache["usdt"] = float(accts.total)
+        _available_cache["usdt"] = float(accts.available)
+        print(f"💰 Equity: {_equity_cache['usdt']:.2f} USDT | Available: {_available_cache['usdt']:.2f} USDT\n")
     except Exception as e:
-        print(f"❌ {e}"); send_telegram(f"❌ Connection: {e}"); sys.exit(1)
+        print(f"⚠️ Cannot fetch equity: {e}")
 
-    _equity_cache["usdt"] = equity
-    _available_cache["usdt"] = available
-
+    # Startup message
     send_telegram(
-        f"🧪 <b>All Strategies Scanner FINAL</b>\n"
-        f"💰 ${equity:.2f} | Free: ${available:.2f}\n"
-        f"📊 Original: {len(ORIGINAL_CONFIGS)} | VESPA: {len(VESPA_CONFIGS)} | FILTER: {len(FILTER_CONFIGS)}\n"
-        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+        f"🚀 <b>Scanner Started — 18 Configs</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Equity: {_equity_cache.get('usdt', 0):.2f} USDT\n"
+        f"🎯 Risk per trade: {RISK_PCT*100:.1f}%\n"
+        f"🔧 Leverage: {LEVERAGE}x\n"
+        f"📊 Portfolio: 18 configs (all WF 4/4)\n"
+        f"🧪 <i>TESTNET</i>"
     )
 
-    send_positions_report()
+    cycle = 0
+    while True:
+        cycle += 1
+        print(f"\n{'='*80}")
+        print(f"  🔄 CYCLE {cycle} — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        print(f"{'='*80}")
 
-    for cfg in BEST_CONFIGS:
+        # Refresh equity every 10 cycles
+        if cycle % 10 == 1:
+            try:
+                accts = futures_api.list_futures_accounts("usdt")
+                _equity_cache["usdt"] = float(accts.total)
+                _available_cache["usdt"] = float(accts.available)
+            except: pass
+
+        for cfg in OPTIMIZED_CONFIGS:
+            try:
+                process_config(cfg)
+            except Exception as e:
+                print(f"  ⚠️ {cfg['symbol']} error: {e}")
+
+        # Reports every cycle
         try:
-            process_config(cfg)
+            send_positions_report()
+            if cycle % 5 == 0:
+                send_trade_stats()
         except Exception as e:
-            print(f"  ❌ {cfg['symbol']}: {e}")
+            print(f"  ⚠️ Report error: {e}")
 
-    send_positions_report()
-    send_trade_stats()
-    print(f"\n✅ Run complete — {len(BEST_CONFIGS)} configs checked")
+        # Sleep between cycles (5 minutes)
+        print(f"\n  💤 Sleeping 5 min...")
+        time.sleep(300)
 
 if __name__ == "__main__":
     main()
