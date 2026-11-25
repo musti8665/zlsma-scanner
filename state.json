@@ -1,7 +1,4 @@
 {
-  "BTC_USDT": "BTC/USDC|15m|MACD",
   "HYPE_USDT": "HYPE/USD|15m|QQE",
-  "KAS_USDT": "KAS/USDT|30m|Volume",
-  "XRP_USDT": "XRP/USDT|1h|Supertrend",
-  "DOGE_USDT": "DOGE/USDT|1h|TMA_CROSS+VWMA"
+  "KAS_USDT": "KAS/USDT|30m|Volume"
 }
