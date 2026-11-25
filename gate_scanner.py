@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gate.io Futures TestNet Scanner — 18 OPTIMIZED CONFIGS (v6→v13)
-================================================================
-All configs verified through 6 rounds of parameter tuning (v6→v13):
-  - WF 4/4 (positive in all 4 walk-forward windows)
-  - wf_min > 6.7% (worst window also profitable)
-  - Mean wf_mean: 17.4%
-  - 4 MA types, 2 timeframes, 18 unique symbols
-
-Each signal shows: strategy, params, WF stats, source version.
+Gate.io Futures TestNet Scanner — 19 OPTIMIZED CONFIGS (v6→v14-TUNED)
+=====================================================================
+v14-Tuned portfolio = v13 (18) + SYN (transfer from DOGE 1d)
+  - 19 unique symbols
+  - All WF 4/4 (positive in all 4 windows)
+  - wf_min > 6.7% | Mean wf_min ~10.9% | Mean wf_mean ~17.8%
+  - 4 MA types (LSMA, WMA, HMA, DMA), 2 TFs (4h, 1d)
+  - SYN: v14 golden transfer (DOGE 1d HMA → SYN 4h HMA)
 """
 
 import os, sys, json, time, requests
@@ -41,12 +40,12 @@ def send_telegram(text):
     except Exception as e:
         print(f"  [TG] Error: {e}")
 
-print("🧪 GATE.IO TESTNET — 18 OPTIMIZED CONFIGS")
+print("🧪 GATE.IO TESTNET — 19 OPTIMIZED CONFIGS (v14-Tuned)")
 
 # ============================================================
-# PARAMETERS
+# PARAMETERS — tweaked for 19 configs
 # ============================================================
-RISK_PCT       = 0.01   # نصف نرمال (18 config همزمان)
+RISK_PCT       = 0.008  # کمی کمتر از v13 (19 config همزمان، 0.8% هر)
 ATR_MULT_SL    = 2.5
 ATR_MULT_TP    = 7.5
 MAX_CONTRACTS  = 90_000
@@ -57,10 +56,13 @@ COOLDOWN_HOURS = 4
 MAX_MARGIN_PCT = 0.20
 
 # ============================================================
-# 18 OPTIMIZED CONFIGS (sorted by wf_min, safety-first)
+# 19 OPTIMIZED CONFIGS — v14-Tuned
+# 18 از v13 (پارامترهای دقیق) + 1 از v14 (SYN transfer)
 # ============================================================
 OPTIMIZED_CONFIGS = [
-    # TIER 1 — wf_min > 12% (6 configs, پایهٔ اصلی)
+    # ═══════════════════════════════════════════════════════════════
+    # TIER 1 — wf_min > 11% (6 configs — هستهٔ اصلی)
+    # ═══════════════════════════════════════════════════════════════
     {"symbol": "ZEC/USDT", "timeframe": "1d", "ma_type": "LSMA",
      "params": {"fast": 9, "slow": 79},
      "wf_min": 17.4, "wf_mean": 25.0, "score": 43.2, "src": "v6", "n_trades": 32, "pf": 5.13},
@@ -85,7 +87,9 @@ OPTIMIZED_CONFIGS = [
      "params": {"fast": 27, "slow": 130},
      "wf_min": 11.4, "wf_mean": 22.0, "score": 43.0, "src": "v9", "n_trades": 23, "pf": 6.83},
 
-    # TIER 2 — wf_min 9-12% (4 configs)
+    # ═══════════════════════════════════════════════════════════════
+    # TIER 2 — wf_min 9-11% (5 configs، شامل SYN جدید)
+    # ═══════════════════════════════════════════════════════════════
     {"symbol": "CVC/USDT", "timeframe": "4h", "ma_type": "DMA",
      "params": {"fast": 14, "fast_shift": 15, "slow": 50, "slow_shift": 5},
      "wf_min": 11.2, "wf_mean": 20.9, "score": 47.4, "src": "v11", "n_trades": 75, "pf": 1.72},
@@ -102,7 +106,15 @@ OPTIMIZED_CONFIGS = [
      "params": {"fast": 13, "fast_shift": 12, "slow": 52, "slow_shift": 5},
      "wf_min": 9.8, "wf_mean": 19.2, "score": 38.4, "src": "v9", "n_trades": 52, "pf": 2.23},
 
-    # TIER 3 — wf_min 8-9% (4 configs)
+    # ⭐ v14 GOLDEN TRANSFER (از DOGE 1d HMA به SYN 4h HMA)
+    {"symbol": "SYN/USDT", "timeframe": "4h", "ma_type": "HMA",
+     "params": {"fast": 24, "slow": 129},  # از DOGE/USDT 1d
+     "wf_min": 9.0, "wf_mean": 18.4, "score": 29.4,
+     "src": "v14_<-DOGE1d", "n_trades": 53, "pf": 1.76},
+
+    # ═══════════════════════════════════════════════════════════════
+    # TIER 3 — wf_min 8-9% (3 configs)
+    # ═══════════════════════════════════════════════════════════════
     {"symbol": "SNX/USDT", "timeframe": "4h", "ma_type": "DMA",
      "params": {"fast": 22, "fast_shift": 15, "slow": 50, "slow_shift": 10},
      "wf_min": 9.0, "wf_mean": 14.5, "score": 27.9, "src": "v9", "n_trades": 59, "pf": 1.72},
@@ -115,11 +127,13 @@ OPTIMIZED_CONFIGS = [
      "params": {"fast": 13, "fast_shift": 12, "slow": 221, "slow_shift": 25},
      "wf_min": 8.5, "wf_mean": 13.3, "score": 15.1, "src": "v11", "n_trades": 19, "pf": 2.55},
 
+    # ═══════════════════════════════════════════════════════════════
+    # TIER 4 — wf_min 7-8.5% (5 configs، پایهٔ ریسک‌پذیرتر)
+    # ═══════════════════════════════════════════════════════════════
     {"symbol": "BLUR/USDT", "timeframe": "4h", "ma_type": "WMA",
      "params": {"fast": 49, "slow": 119},
      "wf_min": 8.3, "wf_mean": 15.6, "score": 26.6, "src": "v9", "n_trades": 22, "pf": 2.76},
 
-    # TIER 4 — wf_min 6-8% (4 configs جدید)
     {"symbol": "PENGU/USDT", "timeframe": "4h", "ma_type": "LSMA",
      "params": {"fast": 49, "slow": 139},
      "wf_min": 7.8, "wf_mean": 15.9, "score": 26.8, "src": "v12", "n_trades": 31, "pf": 2.32},
@@ -139,16 +153,18 @@ OPTIMIZED_CONFIGS = [
 
 # Print startup summary
 print("\n" + "="*140)
-print(f"  📋 LOADED {len(OPTIMIZED_CONFIGS)} OPTIMIZED CONFIGS")
+print(f"  📋 LOADED {len(OPTIMIZED_CONFIGS)} OPTIMIZED CONFIGS — v14-Tuned")
 print("="*140)
-print(f"  {'#':>2} {'Symbol':<12} {'TF':<4} {'MA':<6} {'wf_min':>7} {'wf_mean':>8} {'score':>6} {'src':<4}")
-print(f"  {'-'*2} {'-'*12} {'-'*4} {'-'*6} {'-'*7} {'-'*8} {'-'*6} {'-'*4}")
+print(f"  {'#':>2} {'Symbol':<12} {'TF':<4} {'MA':<6} {'wf_min':>7} {'wf_mean':>8} {'score':>6} {'src':<12}")
+print(f"  {'-'*2} {'-'*12} {'-'*4} {'-'*6} {'-'*7} {'-'*8} {'-'*6} {'-'*12}")
 for i, c in enumerate(OPTIMIZED_CONFIGS, 1):
     print(f"  {i:>2} {c['symbol']:<12} {c['timeframe']:<4} {c['ma_type']:<6} "
-          f"{c['wf_min']:>6.1f}% {c['wf_mean']:>7.1f}% {c['score']:>6.1f} {c['src']:<4}")
+          f"{c['wf_min']:>6.1f}% {c['wf_mean']:>7.1f}% {c['score']:>6.1f} {c['src']:<12}")
 print("="*140)
 print(f"  Mean wf_min: {np.mean([c['wf_min'] for c in OPTIMIZED_CONFIGS]):.1f}%  |  "
       f"Mean wf_mean: {np.mean([c['wf_mean'] for c in OPTIMIZED_CONFIGS]):.1f}%")
+print(f"  Min wf_min: {min(c['wf_min'] for c in OPTIMIZED_CONFIGS):.1f}% (PIXEL)  |  "
+      f"Max wf_min: {max(c['wf_min'] for c in OPTIMIZED_CONFIGS):.1f}% (ZEC)")
 print("="*140 + "\n")
 
 # ============================================================
@@ -237,7 +253,6 @@ def tma(s, p):
     return s.rolling(h).mean().rolling(h).mean()
 
 def lsma(s, p):
-    """Least Squares Moving Average."""
     p = int(p)
     if p < 2: p = 2
     n = len(s)
@@ -255,54 +270,39 @@ def lsma(s, p):
     return pd.Series(out, index=s.index)
 
 def dma_ma(s, p, shift=5):
-    """Displaced Moving Average."""
     return s.rolling(int(p)).mean().shift(int(shift))
 
 # ============================================================
 # SIGNALS
 # ============================================================
 def compute_ma(close, ma_type, params):
-    """Compute fast and slow MA for a given MA type."""
-    fast = params["fast"]
-    slow = params["slow"]
-    if ma_type == "WMA":
-        return wma(close, fast), wma(close, slow)
-    elif ma_type == "HMA":
-        return hma(close, fast), hma(close, slow)
-    elif ma_type == "DEMA":
-        return dema(close, fast), dema(close, slow)
-    elif ma_type == "TMA":
-        return tma(close, fast), tma(close, slow)
-    elif ma_type == "LSMA":
-        return lsma(close, fast), lsma(close, slow)
+    fast = params["fast"]; slow = params["slow"]
+    if ma_type == "WMA":   return wma(close, fast), wma(close, slow)
+    elif ma_type == "HMA": return hma(close, fast), hma(close, slow)
+    elif ma_type == "DEMA":return dema(close, fast), dema(close, slow)
+    elif ma_type == "TMA": return tma(close, fast), tma(close, slow)
+    elif ma_type == "LSMA":return lsma(close, fast), lsma(close, slow)
     elif ma_type == "DMA":
-        fs = params.get("fast_shift", 5)
-        ss = params.get("slow_shift", 10)
+        fs = params.get("fast_shift", 5); ss = params.get("slow_shift", 10)
         return dma_ma(close, fast, fs), dma_ma(close, slow, ss)
-    else:
-        return None, None
+    return None, None
 
 def get_ma_cross_signals(df, ma_type, params):
-    """Returns +1 at golden cross, -1 at death cross, 0 elsewhere."""
     close = df["close"]
     f, s = compute_ma(close, ma_type, params)
-    if f is None:
-        return np.zeros(len(df), dtype=int)
+    if f is None: return np.zeros(len(df), dtype=int)
     sig = np.zeros(len(df), dtype=int)
     sig[(f > s) & (f.shift(1) <= s.shift(1))] = 1
     sig[(f < s) & (f.shift(1) >= s.shift(1))] = -1
     return sig
 
 def get_last_signal(df, ma_type, params):
-    raw = get_ma_cross_signals(df, ma_type, params)
-    return int(raw[-1])
+    return int(get_ma_cross_signals(df, ma_type, params)[-1])
 
 def describe_signal(df, ma_type, params):
-    """Human-readable explanation of last bar's MA state."""
     close = df["close"]
     f, s = compute_ma(close, ma_type, params)
-    if f is None or len(f) < 2:
-        return "N/A"
+    if f is None or len(f) < 2: return "N/A"
     f_now, s_now = float(f.iloc[-1]), float(s.iloc[-1])
     f_prev, s_prev = float(f.iloc[-2]), float(s.iloc[-2])
     if f_prev <= s_prev and f_now > s_now:
@@ -321,7 +321,6 @@ def fetch_candles(contract, tf, limit=300):
     key = (contract, tf)
     if key in _candles_cache: return _candles_cache[key]
     url = f"{GATE_HOST}/futures/usdt/candlesticks"
-    # Gate uses 1d, 4h, 1h, 30m, etc — ok
     try:
         r = requests.get(url, params={"contract": contract, "interval": tf, "limit": limit}, timeout=15)
         if r.status_code != 200: return None
@@ -360,20 +359,16 @@ def set_leverage(contract, lev):
 def place_market_order(contract, size):
     order = FuturesOrder(contract=contract, size=size, price="0", tif="ioc", reduce_only=False)
     try:
-        futures_api.create_futures_order("usdt", order)
-        return True
+        futures_api.create_futures_order("usdt", order); return True
     except Exception as e:
-        print(f"  ❌ Order {contract}: {e}")
-        return False
+        print(f"  ❌ Order {contract}: {e}"); return False
 
 def close_position_market(contract, size):
     order = FuturesOrder(contract=contract, size=0, price="0", tif="ioc", reduce_only=True, close=True)
     try:
-        futures_api.create_futures_order("usdt", order)
-        return True
+        futures_api.create_futures_order("usdt", order); return True
     except Exception as e:
-        print(f"  ❌ Close {contract}: {e}")
-        return False
+        print(f"  ❌ Close {contract}: {e}"); return False
 
 def place_sl_tp(contract, side, sl_price, tp_price, entry_price, size):
     specs = get_contract_specs(contract)
@@ -437,34 +432,27 @@ def send_trade_stats():
 # TRADING LOGIC
 # ============================================================
 def process_config(cfg):
-    symbol = cfg["symbol"]
-    tf = cfg["timeframe"]
-    ma_type = cfg["ma_type"]
-    params = cfg["params"]
+    symbol = cfg["symbol"]; tf = cfg["timeframe"]
+    ma_type = cfg["ma_type"]; params = cfg["params"]
 
     contract = resolve_contract(symbol)
-    if contract is None:
-        return  # silently skip (expected for some symbols on testnet)
+    if contract is None: return
 
     df = fetch_candles(contract, tf, limit=300)
-    if df is None or len(df) < 100:
-        return
+    if df is None or len(df) < 100: return
 
     state = load_json(STATE_FILE)
     cooldown = load_json(COOLDOWN_FILE)
     pos_info = get_position_info(contract)
     current_pos = pos_info["size"] if pos_info else 0
 
-    # Compute signal + description
     entry_sig = get_last_signal(df, ma_type, params)
     sig_desc = describe_signal(df, ma_type, params)
 
-    # Strategy tag (clear ID)
     strat_tag = f"{ma_type}_CROSS"
     param_str = " ".join(f"{k}={v}" for k, v in params.items())
     my_key = f"{symbol}|{tf}|{strat_tag}"
 
-    # Cooldown check
     if contract in cooldown and time.time() - cooldown[contract] < COOLDOWN_HOURS*3600:
         return
 
@@ -486,11 +474,9 @@ def process_config(cfg):
 
             equity = _equity_cache.get("usdt", 0.0)
             if equity <= 0:
-                # Fetch equity
                 try:
                     accts = futures_api.list_futures_accounts("usdt")
-                    equity = float(accts.total)
-                    _equity_cache["usdt"] = equity
+                    equity = float(accts.total); _equity_cache["usdt"] = equity
                     _available_cache["usdt"] = float(accts.available)
                 except: return
             if equity <= 0: return
@@ -513,7 +499,6 @@ def process_config(cfg):
 
             set_leverage(contract, LEVERAGE)
 
-            direction = "LONG" if entry_sig == 1 else "SHORT"
             side_word = "LONG" if entry_sig == 1 else "SHORT"
             emoji = "📈" if entry_sig == 1 else "📉"
 
@@ -531,7 +516,6 @@ def process_config(cfg):
                 else:
                     place_sl_tp(contract, "short", price+sl_dist, price-tp_dist, price, size)
 
-                # DETAILED TELEGRAM
                 sl_price = price - sl_dist if entry_sig == 1 else price + sl_dist
                 tp_price = price + tp_dist if entry_sig == 1 else price - tp_dist
                 send_telegram(
@@ -559,7 +543,6 @@ def process_config(cfg):
             state[contract] = my_key; save_json(STATE_FILE, state); owner = my_key
         if owner != my_key: return
 
-        # Exit: opposite signal
         should_exit = (current_pos > 0 and entry_sig == -1) or (current_pos < 0 and entry_sig == 1)
         if should_exit:
             pnl = pos_info["unrealised_pnl"]
@@ -592,7 +575,6 @@ def process_config(cfg):
 # MAIN
 # ============================================================
 def main():
-    # Fetch equity once at startup
     try:
         accts = futures_api.list_futures_accounts("usdt")
         _equity_cache["usdt"] = float(accts.total)
@@ -601,14 +583,14 @@ def main():
     except Exception as e:
         print(f"⚠️ Cannot fetch equity: {e}")
 
-    # Startup message
     send_telegram(
-        f"🚀 <b>Scanner Started — 18 Configs</b>\n"
+        f"🚀 <b>Scanner Started — 19 Configs (v14-Tuned)</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"💰 Equity: {_equity_cache.get('usdt', 0):.2f} USDT\n"
-        f"🎯 Risk per trade: {RISK_PCT*100:.1f}%\n"
+        f"🎯 Risk per trade: {RISK_PCT*100:.2f}%\n"
         f"🔧 Leverage: {LEVERAGE}x\n"
-        f"📊 Portfolio: 18 configs (all WF 4/4)\n"
+        f"📊 Portfolio: 19 configs (all WF 4/4)\n"
+        f"⭐ New: SYN 4h HMA (v14 golden transfer from DOGE 1d)\n"
         f"🧪 <i>TESTNET</i>"
     )
 
@@ -619,7 +601,6 @@ def main():
         print(f"  🔄 CYCLE {cycle} — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         print(f"{'='*80}")
 
-        # Refresh equity every 10 cycles
         if cycle % 10 == 1:
             try:
                 accts = futures_api.list_futures_accounts("usdt")
@@ -628,20 +609,15 @@ def main():
             except: pass
 
         for cfg in OPTIMIZED_CONFIGS:
-            try:
-                process_config(cfg)
-            except Exception as e:
-                print(f"  ⚠️ {cfg['symbol']} error: {e}")
+            try: process_config(cfg)
+            except Exception as e: print(f"  ⚠️ {cfg['symbol']} error: {e}")
 
-        # Reports every cycle
         try:
             send_positions_report()
-            if cycle % 5 == 0:
-                send_trade_stats()
+            if cycle % 5 == 0: send_trade_stats()
         except Exception as e:
             print(f"  ⚠️ Report error: {e}")
 
-        # Sleep between cycles (5 minutes)
         print(f"\n  💤 Sleeping 5 min...")
         time.sleep(300)
 
