@@ -1,4 +1,5 @@
 {
   "HYPE_USDT": "HYPE/USD|15m|QQE",
-  "KAS_USDT": "KAS/USDT|30m|Volume"
+  "KAS_USDT": "KAS/USDT|30m|Volume",
+  "SUI_USDT": "SUI/USDT|4h|LSMA_CROSS"
 }
